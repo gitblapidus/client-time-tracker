@@ -1,0 +1,99 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  name         String
+  role         String
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  timeEntriesCreated TimeEntry[] @relation("TimeEntryCreatedBy")
+  timeEntriesUpdated TimeEntry[] @relation("TimeEntryUpdatedBy")
+}
+
+model Client {
+  id              String    @id @default(cuid())
+  name            String    @unique
+  financeEmail    String?
+  executiveName   String?
+  executiveEmail  String?
+  spocName        String?
+  spocEmail       String?
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  projects        Project[]
+
+  @@index([active])
+  @@index([name])
+}
+
+model ProductionManager {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([name])
+}
+
+model Project {
+  id                    String      @id @default(cuid())
+  clientId              String
+  client                Client      @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  name                  String
+  type                  String
+  monthlyHours           Float?
+  maximumCarryoverHours  Float?
+  openingCarryoverHours  Float?
+  productionManager      String?
+  active                Boolean     @default(true)
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  timeEntries           TimeEntry[]
+
+  @@unique([clientId, name])
+  @@index([clientId])
+  @@index([active])
+  @@index([type])
+  @@index([productionManager])
+}
+
+model TimeEntry {
+  id                String   @id @default(cuid())
+  projectId         String
+  project           Project  @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  month             Int
+  year              Int
+  hoursUsed         Float
+  developmentHours  Float?
+  pmHours           Float?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  createdById       String
+  updatedById       String
+  createdBy         User     @relation("TimeEntryCreatedBy", fields: [createdById], references: [id])
+  updatedBy         User     @relation("TimeEntryUpdatedBy", fields: [updatedById], references: [id])
+
+  @@unique([projectId, month, year])
+  @@index([projectId])
+  @@index([year, month])
+}
+
+model AppSettings {
+  id                   String   @id @default("default")
+  companyName          String   @default("DSS Partners")
+  financeEmail         String?
+  defaultMonthlyHours  Float    @default(40)
+  fiscalYearStartMonth Int      @default(1)
+  updatedAt            DateTime @updatedAt
+}

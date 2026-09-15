@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hourline-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hourline
+      POSTGRES_PASSWORD: hourline
+      POSTGRES_DB: hourline
+    ports:
+      - "5432:5432"
+    volumes:
+      - hourline_pgdata:/var/lib/postgresql/data
+
+volumes:
+  hourline_pgdata:
