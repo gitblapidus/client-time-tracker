@@ -1,4 +1,4 @@
-import { isManagedService, roundHours } from "@/lib/calculations";
+import { isCapitalTimeAndMaterials, isManagedService, isTimeAndMaterials, roundHours } from "@/lib/calculations";
 
 export type SplitHoursInput = {
   hoursUsed: number;
@@ -41,12 +41,16 @@ export function resolveTmHours(entry?: SplitHoursInput | null): TmHours {
 export function partitionByProjectType<T extends { projectType?: string; type?: string }>(rows: T[]) {
   const managed: T[] = [];
   const timeAndMaterials: T[] = [];
+  const capitalTimeAndMaterials: T[] = [];
   for (const row of rows) {
-    if (isManagedService(row.projectType ?? row.type ?? "")) {
+    const type = row.projectType ?? row.type ?? "";
+    if (isManagedService(type)) {
       managed.push(row);
-    } else {
+    } else if (isTimeAndMaterials(type)) {
       timeAndMaterials.push(row);
+    } else if (isCapitalTimeAndMaterials(type)) {
+      capitalTimeAndMaterials.push(row);
     }
   }
-  return { managed, timeAndMaterials };
+  return { managed, timeAndMaterials, capitalTimeAndMaterials };
 }

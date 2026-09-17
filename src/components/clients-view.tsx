@@ -26,6 +26,9 @@ export type ClientRecord = {
   executiveEmail: string | null;
   spocName: string | null;
   spocEmail: string | null;
+  currency?: string;
+  devRate?: number;
+  pmRate?: number;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -38,6 +41,13 @@ export type ClientRecord = {
     monthlyHours: number | null;
     maximumCarryoverHours: number | null;
     openingCarryoverHours?: number | null;
+    startYear?: number;
+    startMonth?: number;
+    estimatedDevHours?: number | null;
+    currency?: string | null;
+    devRate?: number | null;
+    estimatedPmHours?: number | null;
+    pmRate?: number | null;
     productionManager: string | null;
     active: boolean;
   }>;

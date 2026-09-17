@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { calculateMonthSnapshot, isManagedService, type ProjectType, type UtilizationStatus } from "@/lib/calculations";
+import { calculateMonthSnapshot, isManagedService, PROJECT_TYPE_LABELS, type ProjectType, type UtilizationStatus } from "@/lib/calculations";
 import { currentYearMonth, formatYearMonth } from "@/lib/months";
 import { partitionByProjectType, totalTmHours } from "@/lib/time-hours";
 import { formatHours, formatHoursUnit, nextMonthHint } from "@/lib/utils";
@@ -23,7 +23,7 @@ import { TableSkeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SummaryCard } from "@/components/ui/summary-card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Clock3, Gauge, Percent, Wallet } from "lucide-react";
+import { Clock3, Gauge, Wallet } from "lucide-react";
 
 type TimeRow = {
   projectId: string;
@@ -74,8 +74,8 @@ function liveRow(row: TimeRow, draft: DraftHours): TimeRow {
       monthlyHours: row.monthlyHours,
       maximumCarryoverHours: row.maximumCarryoverHours,
       openingCarryoverHours: null,
-      createdYear: row.year,
-      createdMonth: row.month,
+      startYear: row.year,
+      startMonth: row.month,
     },
     hoursUsed,
     prior,
@@ -109,6 +109,143 @@ function HoursReadout({ children }: { children: ReactNode }) {
     <span className="inline-flex h-8 w-[5.5rem] items-center justify-end px-2 font-medium tabular-nums">
       {children}
     </span>
+  );
+}
+
+function splitHoursSummary(rows: TimeRow[]) {
+  return {
+    development: rows.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0),
+    pm: rows.reduce((sum, row) => sum + (row.pmHours ?? 0), 0),
+    total: rows.reduce((sum, row) => sum + row.hoursUsed, 0),
+  };
+}
+
+function SplitHoursSection({
+  title,
+  rows,
+  drafts,
+  onUpdate,
+}: {
+  title: string;
+  rows: TimeRow[];
+  drafts: Record<string, DraftHours>;
+  onUpdate: (projectId: string, patch: Partial<DraftHours>) => void;
+}) {
+  if (rows.length === 0) return null;
+  const totals = splitHoursSummary(rows);
+  return (
+    <>
+      <ProjectTypeHeading title={title} count={rows.length} />
+      <div className="hidden lg:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Client</TableHead>
+              <TableHead>Project</TableHead>
+              <TableHead>Project Manager</TableHead>
+              <TableHead className="whitespace-nowrap text-right pr-6">Development Hours</TableHead>
+              <TableHead className="whitespace-nowrap text-right pr-6">PM Hours</TableHead>
+              <TableHead className="whitespace-nowrap text-right pr-6">Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const draft = drafts[row.projectId] ?? draftFromRow(row);
+              return (
+                <TableRow key={row.projectId}>
+                  <TableCell className="font-medium">{row.clientName}</TableCell>
+                  <TableCell className="font-medium">{row.projectName}</TableCell>
+                  <TableCell>{row.productionManager ?? "—"}</TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <NumericInput
+                        aria-label={`Development hours for ${row.projectName}`}
+                        value={draft.developmentHours}
+                        onValueChange={(value) => onUpdate(row.projectId, { developmentHours: value })}
+                      />
+                    </HoursAlign>
+                  </TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <NumericInput
+                        aria-label={`PM hours for ${row.projectName}`}
+                        value={draft.pmHours}
+                        onValueChange={(value) => onUpdate(row.projectId, { pmHours: value })}
+                      />
+                    </HoursAlign>
+                  </TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <HoursReadout>
+                        {formatHours(totalTmHours(draft.developmentHours, draft.pmHours))}
+                      </HoursReadout>
+                    </HoursAlign>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={3} className="font-medium text-[var(--muted-foreground)]">Total</TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(totals.development)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(totals.pm)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(totals.total)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+      <div className="divide-y divide-[var(--border)] lg:hidden">
+        {rows.map((row) => {
+          const draft = drafts[row.projectId] ?? draftFromRow(row);
+          return (
+            <div key={row.projectId} className="space-y-3 px-4 py-4">
+              <div className="min-w-0">
+                <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
+                <p className="text-sm text-[var(--foreground)]">{row.projectName}</p>
+                {row.productionManager ? (
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">{row.productionManager}</p>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Development Hours</p>
+                  <NumericInput
+                    aria-label={`Development hours for ${row.projectName}`}
+                    className="w-full"
+                    value={draft.developmentHours}
+                    onValueChange={(value) => onUpdate(row.projectId, { developmentHours: value })}
+                  />
+                </div>
+                <div>
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">PM Hours</p>
+                  <NumericInput
+                    aria-label={`PM hours for ${row.projectName}`}
+                    className="w-full"
+                    value={draft.pmHours}
+                    onValueChange={(value) => onUpdate(row.projectId, { pmHours: value })}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Total</p>
+                  <p className="font-medium tabular-nums">{formatHours(totalTmHours(draft.developmentHours, draft.pmHours))}</p>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 
@@ -257,14 +394,10 @@ export function TimeEntryView() {
     })
     .map((row) => liveRow(row, drafts[row.projectId] ?? draftFromRow(row)));
 
-  const { managed, timeAndMaterials } = partitionByProjectType(displayRows);
+  const { managed, timeAndMaterials, capitalTimeAndMaterials } = partitionByProjectType(displayRows);
   const totalAvailable = managed.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0);
   const totalUsed = displayRows.reduce((sum, row) => sum + row.hoursUsed, 0);
   const totalRemaining = managed.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0);
-  const utilization = totalAvailable > 0 ? (totalUsed / totalAvailable) * 100 : 0;
-  const tmDevelopment = timeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0);
-  const tmPm = timeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0);
-  const tmTotal = timeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0);
 
   return (
     <div className={dirty ? "pb-20 sm:pb-0" : undefined}>
@@ -298,11 +431,10 @@ export function TimeEntryView() {
           </>
         }
       />
-      <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-4 grid gap-3 sm:grid-cols-3">
         <SummaryCard title="Total Available" value={formatHoursUnit(totalAvailable)} icon={Wallet} hint={`${managed.length} managed service projects`} />
         <SummaryCard title="Total Used" value={formatHoursUnit(totalUsed)} icon={Clock3} />
         <SummaryCard title="Remaining" value={formatHoursUnit(totalRemaining)} icon={Gauge} tone={totalRemaining < 0 ? "danger" : "success"} />
-        <SummaryCard title="Utilization" value={`${formatHours(utilization)}%`} icon={Percent} tone={utilization > 100 ? "danger" : utilization >= 90 ? "warning" : "default"} />
       </div>
       <Card className="overflow-hidden">
         <div className="flex flex-col gap-3 border-b border-[var(--border)] p-4 sm:flex-row sm:items-center">
@@ -375,7 +507,7 @@ export function TimeEntryView() {
                           <TableCell className="text-right">
                             <div className="font-medium tabular-nums">{formatHours(row.hoursForNextMonth)}</div>
                             {nextMonthHint(row) ? (
-                              <div className="text-[11px] text-[var(--primary)]">{nextMonthHint(row)}</div>
+                              <div className="text-[calc(11px+1pt)] text-[var(--primary)]">{nextMonthHint(row)}</div>
                             ) : null}
                           </TableCell>
                           <TableCell>
@@ -394,18 +526,18 @@ export function TimeEntryView() {
                           <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
                           <p className="text-sm text-[var(--foreground)]">{row.projectName}</p>
                           {row.productionManager ? (
-                            <p className="text-[11px] text-[var(--muted-foreground)]">{row.productionManager}</p>
+                            <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">{row.productionManager}</p>
                           ) : null}
                         </div>
                         <StatusBadge status={row.status} />
                       </div>
                       <div className="grid grid-cols-2 gap-3 text-sm">
                         <div>
-                          <p className="text-[11px] text-[var(--muted-foreground)]">Available</p>
+                          <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Available</p>
                           <p className="tabular-nums">{formatHours(row.hoursAvailable)}</p>
                         </div>
                         <div>
-                          <p className="text-[11px] text-[var(--muted-foreground)]">Used</p>
+                          <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Used</p>
                           <NumericInput
                             aria-label={`Hours used for ${row.projectName}`}
                             className="w-full"
@@ -414,14 +546,14 @@ export function TimeEntryView() {
                           />
                         </div>
                         <div>
-                          <p className="text-[11px] text-[var(--muted-foreground)]">Remaining</p>
+                          <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Remaining</p>
                           <HoursRemaining value={row.hoursRemaining} />
                         </div>
                         <div>
-                          <p className="text-[11px] text-[var(--muted-foreground)]">Next month</p>
+                          <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Next month</p>
                           <p className="font-medium tabular-nums">{formatHours(row.hoursForNextMonth)}</p>
                           {nextMonthHint(row) ? (
-                            <p className="text-[11px] text-[var(--primary)]">{nextMonthHint(row)}</p>
+                            <p className="text-[calc(11px+1pt)] text-[var(--primary)]">{nextMonthHint(row)}</p>
                           ) : null}
                         </div>
                       </div>
@@ -430,120 +562,18 @@ export function TimeEntryView() {
                 </div>
               </>
             ) : null}
-            {timeAndMaterials.length > 0 ? (
-              <>
-                <ProjectTypeHeading title="Time & Materials" count={timeAndMaterials.length} />
-                <div className="hidden lg:block">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Client</TableHead>
-                        <TableHead>Project</TableHead>
-                        <TableHead>Project Manager</TableHead>
-                        <TableHead className="whitespace-nowrap text-right pr-6">Development Hours</TableHead>
-                        <TableHead className="whitespace-nowrap text-right pr-6">PM Hours</TableHead>
-                        <TableHead className="whitespace-nowrap text-right pr-6">Total</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {timeAndMaterials.map((row) => {
-                        const draft = drafts[row.projectId] ?? draftFromRow(row);
-                        return (
-                          <TableRow key={row.projectId}>
-                            <TableCell className="font-medium">{row.clientName}</TableCell>
-                            <TableCell className="font-medium">{row.projectName}</TableCell>
-                            <TableCell>{row.productionManager ?? "—"}</TableCell>
-                            <TableCell>
-                              <HoursAlign>
-                                <NumericInput
-                                  aria-label={`Development hours for ${row.projectName}`}
-                                  value={draft.developmentHours}
-                                  onValueChange={(value) => updateDraft(row.projectId, { developmentHours: value })}
-                                />
-                              </HoursAlign>
-                            </TableCell>
-                            <TableCell>
-                              <HoursAlign>
-                                <NumericInput
-                                  aria-label={`PM hours for ${row.projectName}`}
-                                  value={draft.pmHours}
-                                  onValueChange={(value) => updateDraft(row.projectId, { pmHours: value })}
-                                />
-                              </HoursAlign>
-                            </TableCell>
-                            <TableCell>
-                              <HoursAlign>
-                                <HoursReadout>
-                                  {formatHours(totalTmHours(draft.developmentHours, draft.pmHours))}
-                                </HoursReadout>
-                              </HoursAlign>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={3} className="font-medium text-[var(--muted-foreground)]">Total</TableCell>
-                        <TableCell>
-                          <HoursAlign>
-                            <HoursReadout>{formatHours(tmDevelopment)}</HoursReadout>
-                          </HoursAlign>
-                        </TableCell>
-                        <TableCell>
-                          <HoursAlign>
-                            <HoursReadout>{formatHours(tmPm)}</HoursReadout>
-                          </HoursAlign>
-                        </TableCell>
-                        <TableCell>
-                          <HoursAlign>
-                            <HoursReadout>{formatHours(tmTotal)}</HoursReadout>
-                          </HoursAlign>
-                        </TableCell>
-                      </TableRow>
-                    </TableBody>
-                  </Table>
-                </div>
-                <div className="divide-y divide-[var(--border)] lg:hidden">
-                  {timeAndMaterials.map((row) => {
-                    const draft = drafts[row.projectId] ?? draftFromRow(row);
-                    return (
-                      <div key={row.projectId} className="space-y-3 px-4 py-4">
-                        <div className="min-w-0">
-                          <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
-                          <p className="text-sm text-[var(--foreground)]">{row.projectName}</p>
-                          {row.productionManager ? (
-                            <p className="text-[11px] text-[var(--muted-foreground)]">{row.productionManager}</p>
-                          ) : null}
-                        </div>
-                        <div className="grid grid-cols-2 gap-3 text-sm">
-                          <div>
-                            <p className="text-[11px] text-[var(--muted-foreground)]">Development Hours</p>
-                            <NumericInput
-                              aria-label={`Development hours for ${row.projectName}`}
-                              className="w-full"
-                              value={draft.developmentHours}
-                              onValueChange={(value) => updateDraft(row.projectId, { developmentHours: value })}
-                            />
-                          </div>
-                          <div>
-                            <p className="text-[11px] text-[var(--muted-foreground)]">PM Hours</p>
-                            <NumericInput
-                              aria-label={`PM hours for ${row.projectName}`}
-                              className="w-full"
-                              value={draft.pmHours}
-                              onValueChange={(value) => updateDraft(row.projectId, { pmHours: value })}
-                            />
-                          </div>
-                          <div className="col-span-2">
-                            <p className="text-[11px] text-[var(--muted-foreground)]">Total</p>
-                            <p className="font-medium tabular-nums">{formatHours(totalTmHours(draft.developmentHours, draft.pmHours))}</p>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : null}
+            <SplitHoursSection
+              title="Time & Materials"
+              rows={timeAndMaterials}
+              drafts={drafts}
+              onUpdate={updateDraft}
+            />
+            <SplitHoursSection
+              title={PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS}
+              rows={capitalTimeAndMaterials}
+              drafts={drafts}
+              onUpdate={updateDraft}
+            />
           </>
         )}
       </Card>

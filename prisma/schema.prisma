@@ -29,6 +29,9 @@ model Client {
   executiveEmail  String?
   spocName        String?
   spocEmail       String?
+  currency        String    @default("USD")
+  devRate         Float     @default(0)
+  pmRate          Float     @default(0)
   active          Boolean   @default(true)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -55,7 +58,15 @@ model Project {
   monthlyHours           Float?
   maximumCarryoverHours  Float?
   openingCarryoverHours  Float?
+  startYear              Int
+  startMonth             Int
+  estimatedDevHours      Float?
+  currency               String?
+  devRate                Float?
+  estimatedPmHours       Float?
+  pmRate                 Float?
   productionManager      String?
+  burnStatus            String      @default("Not Started")
   active                Boolean     @default(true)
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt

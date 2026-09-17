@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildReportWorkbook, managedExportLine } from "../src/lib/report-excel";
+import { buildBurnProject, buildBurnTotals } from "../src/lib/burn-rate";
+import { buildBurnRateWorkbook, buildReportWorkbook, managedExportLine } from "../src/lib/report-excel";
 
 const managedRow = {
   year: 2026,
@@ -39,6 +40,7 @@ describe("Excel report formatting", () => {
       "Summary",
       "Managed Service",
       "Time & Materials",
+      "Capital-Time & Material",
     ]);
 
     const managed = workbook.getWorksheet("Managed Service");
@@ -72,8 +74,66 @@ describe("Excel report formatting", () => {
     expect(carryoverCell?.value).toBe("Includes 19 hrs carryover");
     expect(carryoverCell?.font?.color?.argb).toBe("FF5B9BD5");
 
+    const compactWorkbook = buildReportWorkbook({
+      managed: [managedRow],
+      timeAndMaterials: [],
+      summary: {
+        totalAvailableHours: 49,
+        totalUsedHours: 75,
+        totalRemainingHours: -26.5,
+        averageMonthlyUsage: 75,
+        utilizationPercent: 153.1,
+      },
+      compact: true,
+    });
+    const compactManaged = compactWorkbook.getWorksheet("Managed Service");
+    expect(compactManaged?.getRow(1).getCell(1).value).toBe("Project");
+    expect(compactManaged?.getRow(1).getCell(6).value).toBe("CarryOver");
+    expect(compactManaged?.getRow(2).getCell(1).value).toBe("Application Support");
+    expect(compactManaged?.getRow(2).getCell(4).font?.color?.argb).toBe("FFFF0000");
+
     const summary = workbook.getWorksheet("Summary");
     expect(summary?.getRow(4).getCell(2).numFmt).toBe("0.00");
     expect(summary?.getRow(5).getCell(2).numFmt).toBe('0.00"%"');
+  });
+
+  it("builds a burn rate workbook with grouped metric fills and header totals", () => {
+    const project = buildBurnProject({
+      projectId: "p1",
+      projectName: "System Upgrade (Maria DB, OpenSearch, & Valkey)",
+      clientName: "VANDERSCHOOTEN",
+      currency: "EUR",
+      productionManager: "Brad Lapidus",
+      estimatedPmHours: 7,
+      pmRate: 120,
+      estimatedDevHours: 36,
+      devRate: 80,
+      actualPmHours: 4,
+      actualDevHours: 24,
+    });
+    const totals = buildBurnTotals([project]);
+    const workbook = buildBurnRateWorkbook([project], totals);
+    const sheet = workbook.getWorksheet("Burn Rate");
+    expect(sheet).toBeDefined();
+    expect(sheet?.getRow(1).getCell(4).value).toBe("Estimate (Hr)\n43");
+    expect(sheet?.getRow(1).getCell(5).value).toBe("Estimate (cost)\n3,720 €");
+    expect(sheet?.getRow(1).getCell(6).value).toBe("Actual\n28");
+    expect(sheet?.getRow(1).getCell(7).value).toBe("Actual (Spend)\n2,400 €");
+    expect(sheet?.getRow(1).getCell(8).value).toBe("Remaining (Hr)\n15");
+    expect(sheet?.getRow(1).getCell(9).value).toBe("Remaining (Spend)\n1,320 €");
+    expect(sheet?.getRow(2).getCell(2).value).toBe("Total");
+    expect(sheet?.getRow(2).getCell(4).value).toBe(43);
+    expect(sheet?.getRow(3).getCell(2).value).toBe("PM");
+    expect(sheet?.getRow(4).getCell(2).value).toBe("Dev");
+    expect(sheet?.getRow(3).getCell(4).value).toBe(7);
+    expect(sheet?.getRow(4).getCell(6).value).toBe(24);
+    const totalFill = sheet?.getRow(2).getCell(2).fill as { fgColor?: { argb?: string } } | undefined;
+    expect(totalFill?.fgColor?.argb).toBe("FFC7D3F5");
+    const estimateFill = sheet?.getRow(1).getCell(4).fill as { fgColor?: { argb?: string } } | undefined;
+    const actualFill = sheet?.getRow(1).getCell(6).fill as { fgColor?: { argb?: string } } | undefined;
+    const remainingFill = sheet?.getRow(1).getCell(8).fill as { fgColor?: { argb?: string } } | undefined;
+    expect(estimateFill?.fgColor?.argb).toBe("FFEEF2F6");
+    expect(actualFill?.fgColor?.argb).toBe("FFECFDF5");
+    expect(remainingFill?.fgColor?.argb).toBe("FFFFFBEB");
   });
 });

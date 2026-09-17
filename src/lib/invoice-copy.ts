@@ -1,4 +1,4 @@
-import { isManagedService } from "@/lib/calculations";
+import { isManagedService, PROJECT_TYPE_LABELS } from "@/lib/calculations";
 import { formatYearMonth } from "@/lib/months";
 import { formatHours, formatSignedHours, nextMonthHint } from "@/lib/utils";
 
@@ -56,7 +56,11 @@ export function formatInvoiceCardText(row: InvoiceCopyRow): string {
   return lines.join("\n");
 }
 
-export function formatInvoiceReportText(managed: InvoiceCopyRow[], timeAndMaterials: InvoiceCopyRow[]): string {
+export function formatInvoiceReportText(
+  managed: InvoiceCopyRow[],
+  timeAndMaterials: InvoiceCopyRow[],
+  capitalTimeAndMaterials: InvoiceCopyRow[] = [],
+): string {
   const sections: string[] = [];
   if (managed.length > 0) {
     sections.push(`MANAGED SERVICE (${managed.length})\n\n${managed.map(formatInvoiceCardText).join("\n\n")}`);
@@ -64,16 +68,34 @@ export function formatInvoiceReportText(managed: InvoiceCopyRow[], timeAndMateri
   if (timeAndMaterials.length > 0) {
     sections.push(`TIME & MATERIALS (${timeAndMaterials.length})\n\n${timeAndMaterials.map(formatInvoiceCardText).join("\n\n")}`);
   }
+  if (capitalTimeAndMaterials.length > 0) {
+    sections.push(
+      `${PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS.toUpperCase()} (${capitalTimeAndMaterials.length})\n\n${capitalTimeAndMaterials.map(formatInvoiceCardText).join("\n\n")}`,
+    );
+  }
   return sections.join("\n\n");
 }
 
-export function formatInvoiceReportHtml(managed: InvoiceCopyRow[], timeAndMaterials: InvoiceCopyRow[]): string {
+export function formatInvoiceReportHtml(
+  managed: InvoiceCopyRow[],
+  timeAndMaterials: InvoiceCopyRow[],
+  capitalTimeAndMaterials: InvoiceCopyRow[] = [],
+): string {
   const parts: string[] = [];
   if (managed.length > 0) {
     parts.push(sectionHtml("Managed Service", managed.length, managed.map(managedCardHtml)));
   }
   if (timeAndMaterials.length > 0) {
     parts.push(sectionHtml("Time & Materials", timeAndMaterials.length, timeAndMaterials.map(tmCardHtml)));
+  }
+  if (capitalTimeAndMaterials.length > 0) {
+    parts.push(
+      sectionHtml(
+        PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS,
+        capitalTimeAndMaterials.length,
+        capitalTimeAndMaterials.map(tmCardHtml),
+      ),
+    );
   }
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family:${FONT};color:${INK};font-size:14px;line-height:1.45;">${parts.join(spacerRow(24))}</table>`;
 }

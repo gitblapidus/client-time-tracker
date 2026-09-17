@@ -30,7 +30,7 @@ export function TableHead({ className, ...props }: React.ComponentProps<"th">) {
   return (
     <th
       className={cn(
-        "h-10 px-4 text-left align-middle text-[11px] font-semibold uppercase tracking-[0.06em] text-[var(--muted-foreground)]",
+        "h-10 px-4 text-left align-middle text-[calc(11px+1pt)] font-semibold uppercase tracking-[0.06em] text-[var(--muted-foreground)]",
         className,
       )}
       {...props}

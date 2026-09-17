@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { currentYearMonth, parseYearMonth, toYearMonthInput } from "@/lib/months";
+import { PROJECT_TYPE_LABELS, currencySymbol, inheritedCapitalRates } from "@/lib/calculations";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -20,6 +22,13 @@ export type ProjectRecord = {
   monthlyHours: number | null;
   maximumCarryoverHours: number | null;
   openingCarryoverHours: number | null;
+  startYear: number;
+  startMonth: number;
+  estimatedDevHours?: number | null;
+  currency?: string | null;
+  devRate?: number | null;
+  estimatedPmHours?: number | null;
+  pmRate?: number | null;
   productionManager: string | null;
   active: boolean;
 };
@@ -35,7 +44,13 @@ export function ProjectFormDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  clients: Array<{ id: string; name: string }>;
+  clients: Array<{
+    id: string;
+    name: string;
+    currency?: string | null;
+    devRate?: number | null;
+    pmRate?: number | null;
+  }>;
   defaultClientId?: string;
   project?: ProjectRecord | null;
   defaultMonthlyHours?: number;
@@ -47,6 +62,13 @@ export function ProjectFormDialog({
   const [monthlyHours, setMonthlyHours] = useState(project?.monthlyHours ?? defaultMonthlyHours);
   const [maxCarryover, setMaxCarryover] = useState(project?.maximumCarryoverHours ?? defaultMonthlyHours);
   const [openingCarryover, setOpeningCarryover] = useState(project?.openingCarryoverHours ?? 0);
+  const [startYear, setStartYear] = useState(project?.startYear ?? currentYearMonth().year);
+  const [startMonth, setStartMonth] = useState(project?.startMonth ?? currentYearMonth().month);
+  const [estimatedDevHours, setEstimatedDevHours] = useState(project?.estimatedDevHours ?? 0);
+  const [currency, setCurrency] = useState(project?.currency ?? "USD");
+  const [devRate, setDevRate] = useState(project?.devRate ?? 0);
+  const [estimatedPmHours, setEstimatedPmHours] = useState(project?.estimatedPmHours ?? 0);
+  const [pmRate, setPmRate] = useState(project?.pmRate ?? 0);
   const [productionManager, setProductionManager] = useState(project?.productionManager ?? "");
   const [productionManagers, setProductionManagers] = useState<string[]>([]);
   const [active, setActive] = useState(project?.active ?? true);
@@ -54,12 +76,22 @@ export function ProjectFormDialog({
 
   useEffect(() => {
     if (!open) return;
-    setClientId(project?.clientId ?? defaultClientId ?? clients[0]?.id ?? "");
+    const nextClientId = project?.clientId ?? defaultClientId ?? clients[0]?.id ?? "";
+    const inherited = inheritedCapitalRates(clients.find((client) => client.id === nextClientId));
+    setClientId(nextClientId);
     setName(project?.name ?? "");
     setType(project?.type ?? "MANAGED_SERVICE");
     setMonthlyHours(project?.monthlyHours ?? defaultMonthlyHours);
     setMaxCarryover(project?.maximumCarryoverHours ?? project?.monthlyHours ?? defaultMonthlyHours);
     setOpeningCarryover(project?.openingCarryoverHours ?? 0);
+    const start = currentYearMonth();
+    setStartYear(project?.startYear ?? start.year);
+    setStartMonth(project?.startMonth ?? start.month);
+    setEstimatedDevHours(project?.estimatedDevHours ?? 0);
+    setCurrency(project?.currency ?? inherited.currency);
+    setDevRate(project?.devRate ?? inherited.devRate);
+    setEstimatedPmHours(project?.estimatedPmHours ?? 0);
+    setPmRate(project?.pmRate ?? inherited.pmRate);
     setProductionManager(project?.productionManager ?? "");
     setActive(project?.active ?? true);
     api<{ productionManagers: string[] }>("/api/production-managers")
@@ -83,6 +115,13 @@ export function ProjectFormDialog({
         monthlyHours: type === "MANAGED_SERVICE" ? monthlyHours : null,
         maximumCarryoverHours: type === "MANAGED_SERVICE" ? maxCarryover : null,
         openingCarryoverHours: type === "MANAGED_SERVICE" ? openingCarryover : null,
+        startYear,
+        startMonth,
+        estimatedDevHours: type === "CAPITAL_TIME_AND_MATERIALS" ? estimatedDevHours : null,
+        currency: type === "CAPITAL_TIME_AND_MATERIALS" ? currency : null,
+        devRate: type === "CAPITAL_TIME_AND_MATERIALS" ? devRate : null,
+        estimatedPmHours: type === "CAPITAL_TIME_AND_MATERIALS" ? estimatedPmHours : null,
+        pmRate: type === "CAPITAL_TIME_AND_MATERIALS" ? pmRate : null,
         productionManager,
         active,
       };
@@ -104,7 +143,7 @@ export function ProjectFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title={project ? "Edit project" : "Add project"}>
+      <DialogContent title={project ? "Edit project" : "Add project"} className="max-h-[90vh] overflow-y-auto">
         <div className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="project-client">Client</Label>
@@ -112,7 +151,16 @@ export function ProjectFormDialog({
               id="project-client"
               className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
               value={clientId}
-              onChange={(event) => setClientId(event.target.value)}
+              onChange={(event) => {
+                const nextClientId = event.target.value;
+                setClientId(nextClientId);
+                if (!project) {
+                  const inherited = inheritedCapitalRates(clients.find((client) => client.id === nextClientId));
+                  setCurrency(inherited.currency);
+                  setDevRate(inherited.devRate);
+                  setPmRate(inherited.pmRate);
+                }
+              }}
               disabled={Boolean(defaultClientId) && !project}
             >
               {clients.map((client) => (
@@ -142,11 +190,38 @@ export function ProjectFormDialog({
               id="project-type"
               className="w-full"
               value={type}
-              onChange={(event) => setType(event.target.value)}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                setType(nextType);
+                if (nextType === "CAPITAL_TIME_AND_MATERIALS" && !project) {
+                  const inherited = inheritedCapitalRates(clients.find((client) => client.id === clientId));
+                  setCurrency(inherited.currency);
+                  setDevRate(inherited.devRate);
+                  setPmRate(inherited.pmRate);
+                }
+              }}
             >
-              <option value="MANAGED_SERVICE">Managed Service</option>
-              <option value="TIME_AND_MATERIALS">Time & Materials</option>
+              <option value="MANAGED_SERVICE">{PROJECT_TYPE_LABELS.MANAGED_SERVICE}</option>
+              <option value="TIME_AND_MATERIALS">{PROJECT_TYPE_LABELS.TIME_AND_MATERIALS}</option>
+              <option value="CAPITAL_TIME_AND_MATERIALS">{PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS}</option>
             </FilterSelect>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="project-start">Start Month</Label>
+            <Input
+              id="project-start"
+              type="month"
+              value={toYearMonthInput(startYear, startMonth)}
+              onChange={(event) => {
+                const parsed = parseYearMonth(event.target.value);
+                if (!parsed) return;
+                setStartYear(parsed.year);
+                setStartMonth(parsed.month);
+              }}
+            />
+            <p className="text-xs text-[var(--muted-foreground)]">
+              The first month this project appears on Time Entry, Dashboard, and Reports.
+            </p>
           </div>
           {type === "MANAGED_SERVICE" ? (
             <>
@@ -171,8 +246,43 @@ export function ProjectFormDialog({
                 <Label htmlFor="opening-carryover">Opening Carryover Hours</Label>
                 <NumericInput id="opening-carryover" value={openingCarryover} onValueChange={setOpeningCarryover} />
                 <p className="text-xs text-[var(--muted-foreground)]">
-                  Unused hours already on the project when tracking starts. Added to the first month&apos;s monthly allocation.
+                  Unused hours already on the project when tracking starts. Added to the Start Month&apos;s monthly allocation.
                 </p>
+              </div>
+            </>
+          ) : type === "CAPITAL_TIME_AND_MATERIALS" ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="project-currency">Currency</Label>
+                <FilterSelect
+                  id="project-currency"
+                  className="w-full"
+                  value={currency}
+                  onChange={(event) => setCurrency(event.target.value)}
+                >
+                  <option value="USD">USD</option>
+                  <option value="EUR">EUR</option>
+                </FilterSelect>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="dev-rate">Dev Rate ({currencySymbol(currency)})</Label>
+                <NumericInput id="dev-rate" className="w-full" value={devRate} onValueChange={setDevRate} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="pm-rate">PM Rate ({currencySymbol(currency)})</Label>
+                <NumericInput id="pm-rate" className="w-full" value={pmRate} onValueChange={setPmRate} />
+                <p className="text-xs text-[var(--muted-foreground)]">
+                  Defaults from the client. Change them here to override for this project.
+                </p>
+              </div>
+              <div className="border-t border-[var(--border)]" role="separator" />
+              <div className="space-y-1.5">
+                <Label htmlFor="estimated-dev-hours">Estimated Dev Hours</Label>
+                <NumericInput id="estimated-dev-hours" className="w-full" value={estimatedDevHours} onValueChange={setEstimatedDevHours} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="estimated-pm-hours">Estimated PM Hours</Label>
+                <NumericInput id="estimated-pm-hours" className="w-full" value={estimatedPmHours} onValueChange={setEstimatedPmHours} />
               </div>
             </>
           ) : (

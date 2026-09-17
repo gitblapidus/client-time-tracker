@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { currencySymbol } from "@/lib/calculations";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { FilterSelect } from "@/components/ui/filter-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { NumericInput } from "@/components/ui/numeric-input";
 import type { ClientRecord } from "@/components/clients-view";
 import { ActiveStatusSelect } from "@/components/ui/active-status-select";
 
@@ -28,6 +31,9 @@ export function ClientFormDialog({
   const [executiveEmail, setExecutiveEmail] = useState(client?.executiveEmail ?? "");
   const [spocName, setSpocName] = useState(client?.spocName ?? "");
   const [spocEmail, setSpocEmail] = useState(client?.spocEmail ?? "");
+  const [currency, setCurrency] = useState(client?.currency ?? "USD");
+  const [devRate, setDevRate] = useState(client?.devRate ?? 0);
+  const [pmRate, setPmRate] = useState(client?.pmRate ?? 0);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -39,6 +45,9 @@ export function ClientFormDialog({
       setExecutiveEmail(client?.executiveEmail ?? "");
       setSpocName(client?.spocName ?? "");
       setSpocEmail(client?.spocEmail ?? "");
+      setCurrency(client?.currency ?? "USD");
+      setDevRate(client?.devRate ?? 0);
+      setPmRate(client?.pmRate ?? 0);
     }
   }, [open, client]);
 
@@ -53,6 +62,9 @@ export function ClientFormDialog({
         executiveEmail,
         spocName,
         spocEmail,
+        currency,
+        devRate,
+        pmRate,
       };
       if (client) {
         await api(`/api/clients/${client.id}`, {
@@ -135,6 +147,29 @@ export function ClientFormDialog({
               Enter one address per line. These contacts are specific to this client and are separate from the generic finance email in Administration.
             </p>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="client-currency">Currency</Label>
+            <FilterSelect
+              id="client-currency"
+              className="w-full"
+              value={currency}
+              onChange={(event) => setCurrency(event.target.value)}
+            >
+              <option value="USD">USD</option>
+              <option value="EUR">EUR</option>
+            </FilterSelect>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="client-dev-rate">Dev Rate ({currencySymbol(currency)})</Label>
+            <NumericInput id="client-dev-rate" className="w-full" value={devRate} onValueChange={setDevRate} />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="client-pm-rate">PM Rate ({currencySymbol(currency)})</Label>
+            <NumericInput id="client-pm-rate" className="w-full" value={pmRate} onValueChange={setPmRate} />
+          </div>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            New Capital-Time & Material projects inherit these values. You can still override them on the project.
+          </p>
           <div className="space-y-1.5">
             <Label htmlFor="client-status">Status</Label>
             <ActiveStatusSelect id="client-status" value={active} onChange={setActive} fullWidth />

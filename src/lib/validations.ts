@@ -1,5 +1,6 @@
 import { z } from "zod";
-import { PROJECT_TYPES } from "@/lib/calculations";
+import { BURN_STATUSES } from "@/lib/burn-rate";
+import { PROJECT_CURRENCIES, PROJECT_TYPES } from "@/lib/calculations";
 import { FINANCE_EMAIL_PATTERN, parseFinanceEmails } from "@/lib/finance-emails";
 import { normalizeProductionManagerName } from "@/lib/production-managers";
 
@@ -59,10 +60,17 @@ export const clientSchema = z.object({
   executiveEmail: optionalContactEmailSchema.optional(),
   spocName: optionalContactNameSchema.optional(),
   spocEmail: optionalContactEmailSchema.optional(),
+  currency: z.enum(PROJECT_CURRENCIES).default("USD"),
+  devRate: nonNegativeNumber.optional().default(0),
+  pmRate: nonNegativeNumber.optional().default(0),
 });
 
 export const clientPatchSchema = z.object({
   active: z.boolean(),
+});
+
+export const projectBurnStatusSchema = z.object({
+  burnStatus: z.enum(BURN_STATUSES),
 });
 
 export const settingsSchema = z.object({
@@ -80,6 +88,13 @@ export const projectSchema = z
     monthlyHours: z.coerce.number().finite().optional().nullable(),
     maximumCarryoverHours: z.coerce.number().finite().optional().nullable(),
     openingCarryoverHours: z.coerce.number().finite().optional().nullable(),
+    startYear: z.coerce.number().int().min(2000).max(2100),
+    startMonth: z.coerce.number().int().min(1).max(12),
+    estimatedDevHours: z.coerce.number().finite().optional().nullable(),
+    currency: z.enum(PROJECT_CURRENCIES).optional().nullable(),
+    devRate: z.coerce.number().finite().optional().nullable(),
+    estimatedPmHours: z.coerce.number().finite().optional().nullable(),
+    pmRate: z.coerce.number().finite().optional().nullable(),
     productionManager: z
       .union([
         z.string().max(120, "Project manager name is too long."),
@@ -124,6 +139,24 @@ export const projectSchema = z
           path: ["openingCarryoverHours"],
           message: "Opening carryover cannot be negative.",
         });
+      }
+    }
+    if (data.type === "CAPITAL_TIME_AND_MATERIALS") {
+      const capitalFields = [
+        ["estimatedDevHours", "Estimated Dev Hours"],
+        ["devRate", "Dev Rate"],
+        ["estimatedPmHours", "Estimated PM Hours"],
+        ["pmRate", "PM Rate"],
+      ] as const;
+      for (const [path, label] of capitalFields) {
+        const value = data[path];
+        if (value != null && !Number.isNaN(value) && value < 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: [path],
+            message: `${label} cannot be negative.`,
+          });
+        }
       }
     }
   });

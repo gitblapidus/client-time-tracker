@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
@@ -13,10 +13,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { formatHours, formatHoursUnit } from "@/lib/utils";
+import { cn, formatHours, formatHoursUnit } from "@/lib/utils";
 import { currentYearMonth, formatYearMonth } from "@/lib/months";
 import { partitionByProjectType } from "@/lib/time-hours";
-import type { UtilizationStatus } from "@/lib/calculations";
+import { PROJECT_TYPE_LABELS, type UtilizationStatus } from "@/lib/calculations";
 import { HoursRemaining } from "@/components/ui/hours-remaining";
 import { MonthSelector } from "@/components/ui/month-selector";
 import { PageHeader } from "@/components/ui/page-header";
@@ -62,6 +62,70 @@ type DashboardResponse = {
 };
 
 type SortKey = "clientName" | "projectName" | "hoursUsed" | "hoursRemaining" | "utilization";
+
+function DashboardSplitHoursTable({
+  rows,
+  SortLabel,
+  onOpenClient,
+}: {
+  rows: DashboardRow[];
+  SortLabel: (props: { label: string; column: SortKey }) => ReactNode;
+  onOpenClient: (clientId: string) => void;
+}) {
+  return (
+    <>
+      <div className="hidden lg:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead><SortLabel label="Client" column="clientName" /></TableHead>
+              <TableHead><SortLabel label="Project" column="projectName" /></TableHead>
+              <TableHead className="text-right">Development Hours</TableHead>
+              <TableHead className="text-right">PM Hours</TableHead>
+              <TableHead className="text-right"><SortLabel label="Total" column="hoursUsed" /></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow
+                key={row.projectId}
+                className="cursor-pointer"
+                onClick={() => onOpenClient(row.clientId)}
+              >
+                <TableCell className="font-medium">{row.clientName}</TableCell>
+                <TableCell>{row.projectName}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatHours(row.developmentHours)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatHours(row.pmHours)}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="divide-y divide-[var(--border)] lg:hidden">
+        {rows.map((row) => (
+          <button
+            key={row.projectId}
+            type="button"
+            className="flex w-full flex-col gap-2 px-4 py-3.5 text-left"
+            onClick={() => onOpenClient(row.clientId)}
+          >
+            <div className="min-w-0">
+              <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
+              <p className="truncate text-sm text-[var(--muted-foreground)]">{row.projectName}</p>
+            </div>
+            <div className="flex items-center justify-between text-sm tabular-nums">
+              <span className="text-[var(--muted-foreground)]">
+                Dev {formatHours(row.developmentHours)} · PM {formatHours(row.pmHours)}
+              </span>
+              <span className="font-medium">Total {formatHours(row.hoursUsed)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
 
 function trendHint(current: number, previous: number) {
   if (!previous) {
@@ -302,7 +366,9 @@ export function DashboardView() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {groupedRows.managed.map((row) => (
+                      {groupedRows.managed.map((row) => {
+                        const percent = utilizationPercent(row.hoursUsed, row.hoursAvailable);
+                        return (
                         <TableRow
                           key={row.projectId}
                           className="cursor-pointer"
@@ -316,13 +382,16 @@ export function DashboardView() {
                             <HoursRemaining value={row.hoursRemaining} />
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
-                            {`${formatHours(utilizationPercent(row.hoursUsed, row.hoursAvailable))}%`}
+                            <span className={cn(percent != null && percent > 100 && "font-medium text-[var(--danger)]")}>
+                              {`${formatHours(percent)}%`}
+                            </span>
                           </TableCell>
                           <TableCell>
                             <StatusBadge status={row.status} />
                           </TableCell>
                         </TableRow>
-                      ))}
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -353,55 +422,21 @@ export function DashboardView() {
             {groupedRows.timeAndMaterials.length > 0 ? (
               <>
                 <ProjectTypeHeading title="Time & Materials" count={groupedRows.timeAndMaterials.length} />
-                <div className="hidden lg:block">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead><SortLabel label="Client" column="clientName" /></TableHead>
-                        <TableHead><SortLabel label="Project" column="projectName" /></TableHead>
-                        <TableHead className="text-right">Development Hours</TableHead>
-                        <TableHead className="text-right">PM Hours</TableHead>
-                        <TableHead className="text-right"><SortLabel label="Total" column="hoursUsed" /></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {groupedRows.timeAndMaterials.map((row) => (
-                        <TableRow
-                          key={row.projectId}
-                          className="cursor-pointer"
-                          onClick={() => router.push(`/clients/${row.clientId}`)}
-                        >
-                          <TableCell className="font-medium">{row.clientName}</TableCell>
-                          <TableCell>{row.projectName}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatHours(row.developmentHours)}</TableCell>
-                          <TableCell className="text-right tabular-nums">{formatHours(row.pmHours)}</TableCell>
-                          <TableCell className="text-right font-medium tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <div className="divide-y divide-[var(--border)] lg:hidden">
-                  {groupedRows.timeAndMaterials.map((row) => (
-                    <button
-                      key={row.projectId}
-                      type="button"
-                      className="flex w-full flex-col gap-2 px-4 py-3.5 text-left"
-                      onClick={() => router.push(`/clients/${row.clientId}`)}
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
-                        <p className="truncate text-sm text-[var(--muted-foreground)]">{row.projectName}</p>
-                      </div>
-                      <div className="flex items-center justify-between text-sm tabular-nums">
-                        <span className="text-[var(--muted-foreground)]">
-                          Dev {formatHours(row.developmentHours)} · PM {formatHours(row.pmHours)}
-                        </span>
-                        <span className="font-medium">Total {formatHours(row.hoursUsed)}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
+                <DashboardSplitHoursTable
+                  rows={groupedRows.timeAndMaterials}
+                  SortLabel={SortLabel}
+                  onOpenClient={(clientId) => router.push(`/clients/${clientId}`)}
+                />
+              </>
+            ) : null}
+            {groupedRows.capitalTimeAndMaterials.length > 0 ? (
+              <>
+                <ProjectTypeHeading title={PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS} count={groupedRows.capitalTimeAndMaterials.length} />
+                <DashboardSplitHoursTable
+                  rows={groupedRows.capitalTimeAndMaterials}
+                  SortLabel={SortLabel}
+                  onOpenClient={(clientId) => router.push(`/clients/${clientId}`)}
+                />
               </>
             ) : null}
           </>

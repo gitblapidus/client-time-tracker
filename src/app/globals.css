@@ -12,8 +12,8 @@
   --primary-hover: #1e40af;
   --primary-foreground: #ffffff;
   --secondary: #1e3a5f;
-  --sidebar: #0b1b33;
-  --sidebar-foreground: #94a3b8;
+  --sidebar: #0a3161;
+  --sidebar-foreground: #c5d4e8;
   --sidebar-active: #1d4ed8;
   --success: #059669;
   --success-soft: #ecfdf5;
@@ -62,7 +62,11 @@
   border-color: var(--border);
 }
 
-html,
+html {
+  height: 100%;
+  font-size: calc(100% + 1pt);
+}
+
 body {
   height: 100%;
 }

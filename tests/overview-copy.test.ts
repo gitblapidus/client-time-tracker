@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatOverviewReportHtml, formatOverviewReportText } from "../src/lib/overview-copy";
+import { formatOverviewReportHtml, formatOverviewReportText, formatWeeklyStatusReportText } from "../src/lib/overview-copy";
 
 const managedRow = {
   year: 2026,
@@ -51,5 +51,24 @@ describe("overview report copy", () => {
     expect(html).toContain("KION Managed Services");
     expect(html).toContain("Includes 18 hrs carryover");
     expect(html).toContain("VDS_Doofinder Project");
+  });
+});
+
+describe("weekly status report copy", () => {
+  it("omits month, client, and project manager columns and includes the heading", () => {
+    const text = formatWeeklyStatusReportText(
+      "KION — September 2026",
+      { totalAvailableHours: 38, totalUsedHours: 35, totalRemainingHours: 18, utilizationPercent: 89.7 },
+      [managedRow],
+      [tmRow],
+    );
+    expect(text).toContain("KION — September 2026");
+    expect(text).toContain("Total Available\t38");
+    expect(text).toContain("MANAGED SERVICE (1)");
+    expect(text).toContain("Project\tAvailable\tUsed\tRemaining\tNext Month");
+    expect(text).not.toContain("Month\tClient\tProject");
+    expect(text).toContain("KION Managed Services\t38\t20\t+18\t58 (Includes 18 hrs carryover)");
+    expect(text).toContain("VDS_Doofinder Project\t10\t5\t15");
+    expect(text).not.toContain("Brad Lapidus");
   });
 });

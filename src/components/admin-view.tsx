@@ -8,6 +8,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { appendQueryValues } from "@/lib/query-params";
 import { formatHours } from "@/lib/utils";
+import { formatYearMonth } from "@/lib/months";
+import { PROJECT_TYPE_LABELS } from "@/lib/calculations";
 import { partitionByProjectType } from "@/lib/time-hours";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -227,8 +229,9 @@ export function AdminView() {
                 value={type}
                 onChange={setType}
                 options={[
-                  { value: "MANAGED_SERVICE", label: "Managed Service" },
-                  { value: "TIME_AND_MATERIALS", label: "Time & Materials" },
+                  { value: "MANAGED_SERVICE", label: PROJECT_TYPE_LABELS.MANAGED_SERVICE },
+                  { value: "TIME_AND_MATERIALS", label: PROJECT_TYPE_LABELS.TIME_AND_MATERIALS },
+                  { value: "CAPITAL_TIME_AND_MATERIALS", label: PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS },
                 ]}
               />
               <FilterMultiSelect
@@ -368,6 +371,7 @@ export function AdminView() {
                   <TableHead>Client</TableHead>
                   <TableHead>Project</TableHead>
                   <TableHead>Project Manager</TableHead>
+                  <TableHead>Start</TableHead>
                   <TableHead className="text-right">Monthly Hours</TableHead>
                   <TableHead className="text-right">Max Carryover</TableHead>
                   <TableHead>Status</TableHead>
@@ -377,7 +381,7 @@ export function AdminView() {
               <TableBody>
                 {groupedProjects.managed.length > 0 ? (
                   <>
-                    <TableSectionRow colSpan={7}>Managed Service ({groupedProjects.managed.length})</TableSectionRow>
+                    <TableSectionRow colSpan={8}>Managed Service ({groupedProjects.managed.length})</TableSectionRow>
                     {groupedProjects.managed.map((project) => (
                       <TableRow key={project.id}>
                         <TableCell>{project.client.name}</TableCell>
@@ -394,6 +398,11 @@ export function AdminView() {
                           </button>
                         </TableCell>
                         <TableCell>{project.productionManager ?? "—"}</TableCell>
+                        <TableCell>
+                          {project.startYear && project.startMonth
+                            ? formatYearMonth(project.startYear, project.startMonth)
+                            : "—"}
+                        </TableCell>
                         <TableCell className="text-right">{formatHours(project.monthlyHours)}</TableCell>
                         <TableCell className="text-right">{formatHours(project.maximumCarryoverHours)}</TableCell>
                         <TableCell>
@@ -413,7 +422,7 @@ export function AdminView() {
                 ) : null}
                 {groupedProjects.timeAndMaterials.length > 0 ? (
                   <>
-                    <TableSectionRow colSpan={7}>Time & Materials ({groupedProjects.timeAndMaterials.length})</TableSectionRow>
+                    <TableSectionRow colSpan={8}>Time & Materials ({groupedProjects.timeAndMaterials.length})</TableSectionRow>
                     {groupedProjects.timeAndMaterials.map((project) => (
                       <TableRow key={project.id}>
                         <TableCell>{project.client.name}</TableCell>
@@ -430,6 +439,54 @@ export function AdminView() {
                           </button>
                         </TableCell>
                         <TableCell>{project.productionManager ?? "—"}</TableCell>
+                        <TableCell>
+                          {project.startYear && project.startMonth
+                            ? formatYearMonth(project.startYear, project.startMonth)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">{formatHours(project.monthlyHours)}</TableCell>
+                        <TableCell className="text-right">{formatHours(project.maximumCarryoverHours)}</TableCell>
+                        <TableCell>
+                          <ActiveStatusSelect
+                            label={`Status for ${project.name}`}
+                            value={project.active}
+                            disabled={updatingStatusId === project.id}
+                            onChange={(active) => updateProjectStatus(project, active)}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button onClick={() => { setEditingProject(project); setProjectOpen(true); }}>Edit</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </>
+                ) : null}
+                {groupedProjects.capitalTimeAndMaterials.length > 0 ? (
+                  <>
+                    <TableSectionRow colSpan={8}>
+                      {PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS} ({groupedProjects.capitalTimeAndMaterials.length})
+                    </TableSectionRow>
+                    {groupedProjects.capitalTimeAndMaterials.map((project) => (
+                      <TableRow key={project.id}>
+                        <TableCell>{project.client.name}</TableCell>
+                        <TableCell>
+                          <button
+                            type="button"
+                            className="font-medium text-blue-700 hover:underline"
+                            onClick={() => {
+                              setEditingProject(project);
+                              setProjectOpen(true);
+                            }}
+                          >
+                            {project.name}
+                          </button>
+                        </TableCell>
+                        <TableCell>{project.productionManager ?? "—"}</TableCell>
+                        <TableCell>
+                          {project.startYear && project.startMonth
+                            ? formatYearMonth(project.startYear, project.startMonth)
+                            : "—"}
+                        </TableCell>
                         <TableCell className="text-right">{formatHours(project.monthlyHours)}</TableCell>
                         <TableCell className="text-right">{formatHours(project.maximumCarryoverHours)}</TableCell>
                         <TableCell>

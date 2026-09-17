@@ -35,9 +35,9 @@ export function UtilizationBar({
       <div className="mb-1.5 flex items-start justify-between gap-3 text-sm">
         <div className="min-w-0">
           <span className="block truncate font-medium text-[var(--foreground)]">{label}</span>
-          {detail ? <span className="block truncate text-[11px] text-[var(--muted-foreground)]">{detail}</span> : null}
+          {detail ? <span className="block truncate text-[calc(11px+1pt)] text-[var(--muted-foreground)]">{detail}</span> : null}
         </div>
-        <span className="shrink-0 tabular-nums text-[var(--muted-foreground)]">
+        <span className={cn("shrink-0 tabular-nums", percent > 100 ? "font-medium text-[var(--danger)]" : "text-[var(--muted-foreground)]")}>
           {formatHours(percent)}%
           {status === "over_allocation" ? (
             <span className="ml-2 font-semibold text-[var(--danger)]">OVER</span>

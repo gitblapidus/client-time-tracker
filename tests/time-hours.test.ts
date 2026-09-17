@@ -31,6 +31,16 @@ describe("T&M hour splits", () => {
     ]);
     expect(grouped.managed.map((row) => row.name)).toEqual(["Support", "Cloud"]);
     expect(grouped.timeAndMaterials.map((row) => row.name)).toEqual(["Integrations"]);
+    expect(grouped.capitalTimeAndMaterials).toEqual([]);
+  });
+
+  it("groups Capital-Time & Material projects separately from Time & Materials", () => {
+    const grouped = partitionByProjectType([
+      { projectType: "CAPITAL_TIME_AND_MATERIALS", name: "ERP Upgrade" },
+      { projectType: "TIME_AND_MATERIALS", name: "Integrations" },
+    ]);
+    expect(grouped.timeAndMaterials.map((row) => row.name)).toEqual(["Integrations"]);
+    expect(grouped.capitalTimeAndMaterials.map((row) => row.name)).toEqual(["ERP Upgrade"]);
   });
 });
 

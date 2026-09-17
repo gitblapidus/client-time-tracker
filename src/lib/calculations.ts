@@ -1,5 +1,42 @@
-export const PROJECT_TYPES = ["MANAGED_SERVICE", "TIME_AND_MATERIALS"] as const;
+export const PROJECT_TYPES = ["MANAGED_SERVICE", "TIME_AND_MATERIALS", "CAPITAL_TIME_AND_MATERIALS"] as const;
 export type ProjectType = (typeof PROJECT_TYPES)[number];
+
+export const TRACKED_PROJECT_TYPES = [
+  "MANAGED_SERVICE",
+  "TIME_AND_MATERIALS",
+  "CAPITAL_TIME_AND_MATERIALS",
+] as const;
+export type TrackedProjectType = (typeof TRACKED_PROJECT_TYPES)[number];
+
+export const PROJECT_CURRENCIES = ["USD", "EUR"] as const;
+export type ProjectCurrency = (typeof PROJECT_CURRENCIES)[number];
+
+export const PROJECT_CURRENCY_SYMBOLS: Record<ProjectCurrency, string> = {
+  USD: "$",
+  EUR: "€",
+};
+
+export function currencySymbol(currency: string | null | undefined): string {
+  return currency === "EUR" ? PROJECT_CURRENCY_SYMBOLS.EUR : PROJECT_CURRENCY_SYMBOLS.USD;
+}
+
+export function inheritedCapitalRates(client?: {
+  currency?: string | null;
+  devRate?: number | null;
+  pmRate?: number | null;
+} | null) {
+  return {
+    currency: (client?.currency === "EUR" ? "EUR" : "USD") as ProjectCurrency,
+    devRate: typeof client?.devRate === "number" && Number.isFinite(client.devRate) ? client.devRate : 0,
+    pmRate: typeof client?.pmRate === "number" && Number.isFinite(client.pmRate) ? client.pmRate : 0,
+  };
+}
+
+export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
+  MANAGED_SERVICE: "Managed Service",
+  TIME_AND_MATERIALS: "Time & Materials",
+  CAPITAL_TIME_AND_MATERIALS: "Capital-Time & Material",
+};
 
 export const UTILIZATION_STATUSES = [
   "healthy",
@@ -15,8 +52,8 @@ export interface ProjectConfig {
   monthlyHours: number | null;
   maximumCarryoverHours: number | null;
   openingCarryoverHours: number | null;
-  createdYear: number;
-  createdMonth: number;
+  startYear: number;
+  startMonth: number;
 }
 
 export interface TimeEntryInput {
@@ -39,6 +76,22 @@ export interface MonthSnapshot {
 
 export function isManagedService(type: ProjectType | string): boolean {
   return type === "MANAGED_SERVICE";
+}
+
+export function isTimeAndMaterials(type: ProjectType | string): boolean {
+  return type === "TIME_AND_MATERIALS";
+}
+
+export function isCapitalTimeAndMaterials(type: ProjectType | string): boolean {
+  return type === "CAPITAL_TIME_AND_MATERIALS";
+}
+
+export function usesSplitHours(type: ProjectType | string): boolean {
+  return isTimeAndMaterials(type) || isCapitalTimeAndMaterials(type);
+}
+
+export function isTimeTrackedProject(type: ProjectType | string): boolean {
+  return isManagedService(type) || usesSplitHours(type);
 }
 
 export function monthKey(year: number, month: number): number {
@@ -176,18 +229,22 @@ function entryMap(entries: TimeEntryInput[]): Map<number, number> {
   return map;
 }
 
-function chainStartKey(config: ProjectConfig, entries: TimeEntryInput[]): number {
-  let start = monthKey(config.createdYear, config.createdMonth);
-  for (const entry of entries) {
-    start = Math.min(start, monthKey(entry.year, entry.month));
-  }
-  return start;
+function chainStartKey(config: ProjectConfig): number {
+  return monthKey(config.startYear, config.startMonth);
+}
+
+export function isOnOrAfterProjectStart(
+  config: Pick<ProjectConfig, "startYear" | "startMonth">,
+  year: number,
+  month: number,
+): boolean {
+  return monthKey(year, month) >= monthKey(config.startYear, config.startMonth);
 }
 
 /**
  * Walks month-by-month from the project start through the target month
  * so historical edits correctly recompute later available hours.
- * Time entries from before the project record was created still feed the chain.
+ * Opening carryover is applied to the first month (the project start month).
  */
 export function calculateForMonth(
   config: ProjectConfig,
@@ -197,7 +254,7 @@ export function calculateForMonth(
 ): MonthSnapshot {
   const usedLookup = entryMap(entries);
   const target = monthKey(targetYear, targetMonth);
-  const start = chainStartKey(config, entries);
+  const start = chainStartKey(config);
 
   if (target < start) {
     const hoursUsed = usedLookup.get(target) ?? 0;
@@ -208,8 +265,7 @@ export function calculateForMonth(
     };
   }
 
-  const created = monthKey(config.createdYear, config.createdMonth);
-  let priorRemaining = start === created ? (config.openingCarryoverHours ?? 0) : 0;
+  let priorRemaining = config.openingCarryoverHours ?? 0;
   let snapshot: MonthSnapshot | null = null;
 
   for (let key = start; key <= target; key += 1) {
@@ -231,8 +287,9 @@ export function calculateRange(
   endYear: number,
   endMonth: number,
 ): MonthSnapshot[] {
-  const start = monthKey(startYear, startMonth);
+  const rangeStart = monthKey(startYear, startMonth);
   const end = monthKey(endYear, endMonth);
+  const start = Math.max(rangeStart, chainStartKey(config));
   const results: MonthSnapshot[] = [];
   for (let key = start; key <= end; key += 1) {
     const { year, month } = fromMonthKey(key);
@@ -246,6 +303,8 @@ export function projectConfigFromRecord(project: {
   monthlyHours: number | null;
   maximumCarryoverHours: number | null;
   openingCarryoverHours?: number | null;
+  startYear?: number | null;
+  startMonth?: number | null;
   createdAt: Date;
 }): ProjectConfig {
   return {
@@ -253,7 +312,7 @@ export function projectConfigFromRecord(project: {
     monthlyHours: project.monthlyHours,
     maximumCarryoverHours: project.maximumCarryoverHours,
     openingCarryoverHours: project.openingCarryoverHours ?? null,
-    createdYear: project.createdAt.getFullYear(),
-    createdMonth: project.createdAt.getMonth() + 1,
+    startYear: project.startYear ?? project.createdAt.getFullYear(),
+    startMonth: project.startMonth ?? project.createdAt.getMonth() + 1,
   };
 }

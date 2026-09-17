@@ -1,4 +1,5 @@
 import { formatYearMonth } from "@/lib/months";
+import { PROJECT_TYPE_LABELS } from "@/lib/calculations";
 import { formatHours, formatSignedHours, nextMonthHint } from "@/lib/utils";
 
 export type OverviewCopyRow = {
@@ -33,8 +34,21 @@ const FONT = "Arial, Helvetica, sans-serif";
 
 const managedHeaders = ["Month", "Client", "Project", "Project Manager", "Available", "Used", "Remaining", "Next Month"];
 const tmHeaders = ["Month", "Client", "Project", "Project Manager", "Development Hours", "PM Hours", "Total"];
+const weeklyManagedHeaders = ["Project", "Available", "Used", "Remaining", "Next Month"];
+const weeklyTmHeaders = ["Project", "Development Hours", "PM Hours", "Total"];
 
-export function formatOverviewReportText(managed: OverviewCopyRow[], timeAndMaterials: OverviewCopyRow[]): string {
+export type WeeklyStatusSummary = {
+  totalAvailableHours: number;
+  totalUsedHours: number;
+  totalRemainingHours: number;
+  utilizationPercent: number;
+};
+
+export function formatOverviewReportText(
+  managed: OverviewCopyRow[],
+  timeAndMaterials: OverviewCopyRow[],
+  capitalTimeAndMaterials: OverviewCopyRow[] = [],
+): string {
   const sections: string[] = [];
   if (managed.length > 0) {
     sections.push(
@@ -46,10 +60,19 @@ export function formatOverviewReportText(managed: OverviewCopyRow[], timeAndMate
       `TIME & MATERIALS (${timeAndMaterials.length})\n${tsv([tmHeaders, ...timeAndMaterials.map(tmTextRow)])}`,
     );
   }
+  if (capitalTimeAndMaterials.length > 0) {
+    sections.push(
+      `${PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS.toUpperCase()} (${capitalTimeAndMaterials.length})\n${tsv([tmHeaders, ...capitalTimeAndMaterials.map(tmTextRow)])}`,
+    );
+  }
   return sections.join("\n\n");
 }
 
-export function formatOverviewReportHtml(managed: OverviewCopyRow[], timeAndMaterials: OverviewCopyRow[]): string {
+export function formatOverviewReportHtml(
+  managed: OverviewCopyRow[],
+  timeAndMaterials: OverviewCopyRow[],
+  capitalTimeAndMaterials: OverviewCopyRow[] = [],
+): string {
   const parts: string[] = [];
   if (managed.length > 0) {
     parts.push(sectionTableHtml("Managed Service", managed.length, managedHeaders, managed.map(managedHtmlRow), [4, 5, 6, 7]));
@@ -57,7 +80,94 @@ export function formatOverviewReportHtml(managed: OverviewCopyRow[], timeAndMate
   if (timeAndMaterials.length > 0) {
     parts.push(sectionTableHtml("Time & Materials", timeAndMaterials.length, tmHeaders, timeAndMaterials.map(tmHtmlRow), [4, 5, 6]));
   }
+  if (capitalTimeAndMaterials.length > 0) {
+    parts.push(
+      sectionTableHtml(
+        PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS,
+        capitalTimeAndMaterials.length,
+        tmHeaders,
+        capitalTimeAndMaterials.map(tmHtmlRow),
+        [4, 5, 6],
+      ),
+    );
+  }
   return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family:${FONT};color:${INK};font-size:14px;line-height:1.45;">${parts.join(spacerRow(24))}</table>`;
+}
+
+export function formatWeeklyStatusReportText(
+  heading: string,
+  summary: WeeklyStatusSummary,
+  managed: OverviewCopyRow[],
+  timeAndMaterials: OverviewCopyRow[],
+  capitalTimeAndMaterials: OverviewCopyRow[] = [],
+): string {
+  const sections = [
+    heading,
+    "",
+    tsv([
+      ["Total Available", cell(summary.totalAvailableHours)],
+      ["Total Used", cell(summary.totalUsedHours)],
+      ["Total Remaining", cell(summary.totalRemainingHours)],
+      ["Utilization", `${cell(summary.utilizationPercent)}%`],
+    ]),
+  ];
+  if (managed.length > 0) {
+    sections.push(
+      "",
+      `MANAGED SERVICE (${managed.length})\n${tsv([weeklyManagedHeaders, ...managed.map(weeklyManagedTextRow)])}`,
+    );
+  }
+  if (timeAndMaterials.length > 0) {
+    sections.push(
+      "",
+      `TIME & MATERIALS (${timeAndMaterials.length})\n${tsv([weeklyTmHeaders, ...timeAndMaterials.map(weeklyTmTextRow)])}`,
+    );
+  }
+  if (capitalTimeAndMaterials.length > 0) {
+    sections.push(
+      "",
+      `${PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS.toUpperCase()} (${capitalTimeAndMaterials.length})\n${tsv([weeklyTmHeaders, ...capitalTimeAndMaterials.map(weeklyTmTextRow)])}`,
+    );
+  }
+  return sections.join("\n").trim();
+}
+
+export function formatWeeklyStatusReportHtml(
+  heading: string,
+  summary: WeeklyStatusSummary,
+  managed: OverviewCopyRow[],
+  timeAndMaterials: OverviewCopyRow[],
+  capitalTimeAndMaterials: OverviewCopyRow[] = [],
+): string {
+  const parts = [
+    `<tr><td style="font-size:20px;font-weight:700;color:${INK};padding:0 0 12px;">${escapeHtml(heading)}</td></tr>`,
+    `<tr><td>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
+        ${summaryHtmlRow("Total Available", cell(summary.totalAvailableHours))}
+        ${summaryHtmlRow("Total Used", cell(summary.totalUsedHours))}
+        ${summaryHtmlRow("Total Remaining", cell(summary.totalRemainingHours))}
+        ${summaryHtmlRow("Utilization", `${cell(summary.utilizationPercent)}%`)}
+      </table>
+    </td></tr>`,
+  ];
+  if (managed.length > 0) {
+    parts.push(sectionTableHtml("Managed Service", managed.length, weeklyManagedHeaders, managed.map(weeklyManagedHtmlRow), [1, 2, 3, 4]));
+  }
+  if (timeAndMaterials.length > 0) {
+    parts.push(sectionTableHtml("Time & Materials", timeAndMaterials.length, weeklyTmHeaders, timeAndMaterials.map(weeklyTmHtmlRow), [1, 2, 3]));
+  }
+  if (capitalTimeAndMaterials.length > 0) {
+    parts.push(
+      sectionTableHtml(
+        PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS,
+        capitalTimeAndMaterials.length,
+        weeklyTmHeaders,
+        capitalTimeAndMaterials.map(weeklyTmHtmlRow),
+        [1, 2, 3],
+      ),
+    );
+  }
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="font-family:${FONT};color:${INK};font-size:14px;line-height:1.45;">${parts.join(spacerRow(20))}</table>`;
 }
 
 function managedTextRow(row: OverviewCopyRow): string[] {
@@ -114,6 +224,33 @@ function tmHtmlRow(row: OverviewCopyRow): string[] {
     escapeHtml(cell(row.pmHours)),
     `<span style="font-weight:600;font-variant-numeric:tabular-nums;">${escapeHtml(cell(row.hoursUsed))}</span>`,
   ];
+}
+
+function weeklyManagedTextRow(row: OverviewCopyRow): string[] {
+  const full = managedTextRow(row);
+  return [full[2], full[4], full[5], full[6], full[7]];
+}
+
+function weeklyTmTextRow(row: OverviewCopyRow): string[] {
+  const full = tmTextRow(row);
+  return [full[2], full[4], full[5], full[6]];
+}
+
+function weeklyManagedHtmlRow(row: OverviewCopyRow): string[] {
+  const full = managedHtmlRow(row);
+  return [full[2], full[4], full[5], full[6], full[7]];
+}
+
+function weeklyTmHtmlRow(row: OverviewCopyRow): string[] {
+  const full = tmHtmlRow(row);
+  return [full[2], full[4], full[5], full[6]];
+}
+
+function summaryHtmlRow(label: string, value: string): string {
+  return `<tr>
+    <td style="padding:4px 0;color:${MUTED};font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.04em;">${escapeHtml(label)}</td>
+    <td style="padding:4px 0;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;">${escapeHtml(value)}</td>
+  </tr>`;
 }
 
 function sectionTableHtml(

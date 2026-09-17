@@ -73,6 +73,9 @@ export async function createClient(input: ClientInput) {
         executiveEmail: input.executiveEmail,
         spocName: input.spocName,
         spocEmail: input.spocEmail,
+        currency: input.currency,
+        devRate: input.devRate,
+        pmRate: input.pmRate,
       },
     }),
   );
@@ -101,6 +104,9 @@ export async function updateClient(id: string, input: ClientInput) {
         executiveEmail: input.executiveEmail,
         spocName: input.spocName,
         spocEmail: input.spocEmail,
+        currency: input.currency,
+        devRate: input.devRate,
+        pmRate: input.pmRate,
       },
     });
   });

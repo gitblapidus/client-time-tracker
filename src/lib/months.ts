@@ -56,3 +56,22 @@ export function compareYearMonth(a: YearMonth, b: YearMonth): number {
 export function isValidYearMonth(year: number, month: number): boolean {
   return Number.isInteger(year) && Number.isInteger(month) && month >= 1 && month <= 12 && year >= 2000 && year <= 2100;
 }
+
+export type MonthRangePreset = "current" | "previous" | "custom";
+
+export function monthRangeForPreset(
+  preset: Exclude<MonthRangePreset, "custom">,
+  date = new Date(),
+): { start: string; end: string } {
+  const current = currentYearMonth(date);
+  const selected = preset === "current" ? current : shiftYearMonth(current.year, current.month, -1);
+  const value = toYearMonthInput(selected.year, selected.month);
+  return { start: value, end: value };
+}
+
+export function detectMonthRangePreset(start: string, end: string, date = new Date()): MonthRangePreset {
+  if (start !== end) return "custom";
+  if (start === monthRangeForPreset("current", date).start) return "current";
+  if (start === monthRangeForPreset("previous", date).start) return "previous";
+  return "custom";
+}

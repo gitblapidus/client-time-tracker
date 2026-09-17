@@ -1,6 +1,8 @@
 import { AppError, ConflictError, NotFoundError } from "@/lib/errors";
+import { inheritedCapitalRates } from "@/lib/calculations";
 import { prisma } from "@/lib/prisma";
 import { normalizeProductionManagerName } from "@/lib/production-managers";
+import { parseBurnStatus, type BurnStatus } from "@/lib/burn-rate";
 import type { ProjectInput } from "@/lib/validations";
 
 async function resolveProductionManager(name: string | null | undefined) {
@@ -19,6 +21,15 @@ async function resolveProductionManager(name: string | null | undefined) {
 
 async function projectData(input: ProjectInput) {
   const isManaged = input.type === "MANAGED_SERVICE";
+  const isCapital = input.type === "CAPITAL_TIME_AND_MATERIALS";
+  const clientDefaults = isCapital
+    ? inheritedCapitalRates(
+        await prisma.client.findUnique({
+          where: { id: input.clientId },
+          select: { currency: true, devRate: true, pmRate: true },
+        }),
+      )
+    : null;
   return {
     clientId: input.clientId,
     name: input.name,
@@ -28,6 +39,13 @@ async function projectData(input: ProjectInput) {
       ? (input.maximumCarryoverHours ?? input.monthlyHours ?? 0)
       : null,
     openingCarryoverHours: isManaged ? input.openingCarryoverHours ?? 0 : null,
+    startYear: input.startYear,
+    startMonth: input.startMonth,
+    estimatedDevHours: isCapital ? input.estimatedDevHours ?? 0 : null,
+    currency: isCapital ? input.currency ?? clientDefaults?.currency ?? "USD" : null,
+    devRate: isCapital ? input.devRate ?? clientDefaults?.devRate ?? 0 : null,
+    estimatedPmHours: isCapital ? input.estimatedPmHours ?? 0 : null,
+    pmRate: isCapital ? input.pmRate ?? clientDefaults?.pmRate ?? 0 : null,
     productionManager: await resolveProductionManager(input.productionManager),
     active: input.active,
   };
@@ -152,6 +170,15 @@ export async function updateProject(id: string, input: ProjectInput) {
   return prisma.project.update({
     where: { id },
     data: await projectData(input),
+    include: { client: true },
+  });
+}
+
+export async function setProjectBurnStatus(id: string, status: BurnStatus) {
+  await getProject(id);
+  return prisma.project.update({
+    where: { id },
+    data: { burnStatus: parseBurnStatus(status) },
     include: { client: true },
   });
 }

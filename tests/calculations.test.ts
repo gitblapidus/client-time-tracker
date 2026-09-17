@@ -6,7 +6,9 @@ import {
   calculateHoursRemaining,
   calculateMonthSnapshot,
   calculateNextMonthHours,
+  calculateRange,
   getUtilizationStatus,
+  inheritedCapitalRates,
   type ProjectConfig,
 } from "../src/lib/calculations";
 
@@ -18,8 +20,8 @@ const managed = (
   monthlyHours,
   maximumCarryoverHours,
   openingCarryoverHours: null,
-  createdYear: 2026,
-  createdMonth: 1,
+  startYear: 2026,
+  startMonth: 1,
 });
 
 describe("managed service calculations", () => {
@@ -99,14 +101,14 @@ describe("managed service calculations", () => {
     expect(february.hoursRemaining).toBe(10);
   });
 
-  it("applies overage from hours entered before the project created month", () => {
+  it("does not apply hours from before the project start month to the chain", () => {
     const config: ProjectConfig = {
       type: "MANAGED_SERVICE",
       monthlyHours: 40,
       maximumCarryoverHours: 40,
       openingCarryoverHours: null,
-      createdYear: 2026,
-      createdMonth: 9,
+      startYear: 2026,
+      startMonth: 9,
     };
     const entries = [
       { year: 2026, month: 8, hoursUsed: 42 },
@@ -115,12 +117,11 @@ describe("managed service calculations", () => {
     const august = calculateForMonth(config, entries, 2026, 8);
     expect(august.hoursAvailable).toBe(40);
     expect(august.hoursRemaining).toBe(-2);
-    expect(august.hoursForNextMonth).toBe(38);
 
     const september = calculateForMonth(config, entries, 2026, 9);
-    expect(september.carryoverUsed).toBe(-2);
-    expect(september.hoursAvailable).toBe(38);
-    expect(september.hoursRemaining).toBe(18);
+    expect(september.carryoverUsed).toBe(0);
+    expect(september.hoursAvailable).toBe(40);
+    expect(september.hoursRemaining).toBe(20);
   });
 
   it("uses opening carryover so the first month can start above monthly hours", () => {
@@ -129,14 +130,45 @@ describe("managed service calculations", () => {
       monthlyHours: 40,
       maximumCarryoverHours: 40,
       openingCarryoverHours: 40,
-      createdYear: 2026,
-      createdMonth: 1,
+      startYear: 2026,
+      startMonth: 1,
     };
     const january = calculateForMonth(config, [], 2026, 1);
     expect(january.carryoverUsed).toBe(40);
     expect(january.hoursAvailable).toBe(80);
     expect(january.hoursRemaining).toBe(80);
     expect(january.hoursForNextMonth).toBe(80);
+  });
+
+  it("uses the project start month as the first chain month", () => {
+    const config: ProjectConfig = {
+      type: "MANAGED_SERVICE",
+      monthlyHours: 40,
+      maximumCarryoverHours: 40,
+      openingCarryoverHours: 40,
+      startYear: 2026,
+      startMonth: 9,
+    };
+    const september = calculateForMonth(config, [], 2026, 9);
+    expect(september.carryoverUsed).toBe(40);
+    expect(september.hoursAvailable).toBe(80);
+
+    const august = calculateForMonth(config, [{ year: 2026, month: 8, hoursUsed: 42 }], 2026, 9);
+    expect(august.hoursAvailable).toBe(80);
+  });
+
+  it("omits months before the project start from a report range", () => {
+    const config: ProjectConfig = {
+      type: "MANAGED_SERVICE",
+      monthlyHours: 40,
+      maximumCarryoverHours: 40,
+      openingCarryoverHours: 40,
+      startYear: 2026,
+      startMonth: 9,
+    };
+    const snapshots = calculateRange(config, [], 2026, 8, 2026, 10);
+    expect(snapshots.map((row) => row.month)).toEqual([9, 10]);
+    expect(snapshots[0]?.hoursAvailable).toBe(80);
   });
 
   it("does not carry more than maximum carryover across the chain", () => {
@@ -157,8 +189,8 @@ describe("time and materials", () => {
       monthlyHours: null,
       maximumCarryoverHours: null,
       openingCarryoverHours: null,
-      createdYear: 2026,
-      createdMonth: 1,
+      startYear: 2026,
+      startMonth: 1,
     };
     const result = calculateMonthSnapshot(config, 22.5, 40);
     expect(result.hoursUsed).toBe(22.5);
@@ -167,6 +199,24 @@ describe("time and materials", () => {
     expect(result.hoursForNextMonth).toBeNull();
     expect(result.carryoverUsed).toBeNull();
     expect(result.utilizationPercent).toBeNull();
+    expect(result.status).toBe("not_applicable");
+  });
+
+  it("treats Capital-Time & Material like Time & Materials for monthly snapshots", () => {
+    const result = calculateMonthSnapshot(
+      {
+        type: "CAPITAL_TIME_AND_MATERIALS",
+        monthlyHours: null,
+        maximumCarryoverHours: null,
+        openingCarryoverHours: null,
+        startYear: 2026,
+        startMonth: 1,
+      },
+      12,
+      40,
+    );
+    expect(result.hoursUsed).toBe(12);
+    expect(result.hoursAvailable).toBeNull();
     expect(result.status).toBe("not_applicable");
   });
 });
@@ -181,5 +231,18 @@ describe("utilization status bands", () => {
     expect(getUtilizationStatus(100)).toBe("at_limit");
     expect(getUtilizationStatus(100.1)).toBe("over_allocation");
     expect(getUtilizationStatus(null)).toBe("not_applicable");
+  });
+});
+
+describe("inherited capital rates", () => {
+  it("copies currency and rates from the client", () => {
+    expect(
+      inheritedCapitalRates({ currency: "EUR", devRate: 95, pmRate: 125 }),
+    ).toEqual({ currency: "EUR", devRate: 95, pmRate: 125 });
+  });
+
+  it("falls back to USD and zero when the client has no billing defaults", () => {
+    expect(inheritedCapitalRates(null)).toEqual({ currency: "USD", devRate: 0, pmRate: 0 });
+    expect(inheritedCapitalRates({})).toEqual({ currency: "USD", devRate: 0, pmRate: 0 });
   });
 });

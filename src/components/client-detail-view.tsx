@@ -9,6 +9,7 @@ import { api } from "@/lib/api";
 import { currentYearMonth, formatYearMonth } from "@/lib/months";
 import { formatHours, formatHoursUnit } from "@/lib/utils";
 import { partitionByProjectType } from "@/lib/time-hours";
+import { PROJECT_TYPE_LABELS, currencySymbol } from "@/lib/calculations";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -141,7 +142,7 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
   }
 
   const groupedProjects = partitionByProjectType(client.projects);
-  const projectColSpan = canEdit ? 6 : 5;
+  const projectColSpan = canEdit ? 7 : 6;
 
   return (
     <div>
@@ -252,6 +253,26 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
             </p>
           ) : null}
         </div>
+        <div className="mt-6 border-t border-slate-100 pt-6">
+          <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Billing defaults</p>
+          <div className="mt-3 grid gap-6 sm:grid-cols-3">
+            <div>
+              <p className="text-sm text-[var(--muted-foreground)]">Currency</p>
+              <p className="mt-1 text-lg font-medium text-[var(--foreground)]">{client.currency ?? "USD"}</p>
+            </div>
+            <div>
+              <p className="text-sm text-[var(--muted-foreground)]">Dev Rate ({currencySymbol(client.currency)})</p>
+              <p className="mt-1 text-lg font-medium tabular-nums text-[var(--foreground)]">{formatHours(client.devRate ?? 0)}</p>
+            </div>
+            <div>
+              <p className="text-sm text-[var(--muted-foreground)]">PM Rate ({currencySymbol(client.currency)})</p>
+              <p className="mt-1 text-lg font-medium tabular-nums text-[var(--foreground)]">{formatHours(client.pmRate ?? 0)}</p>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-[var(--muted-foreground)]">
+            New Capital-Time & Material projects inherit these values. Individual projects can override them.
+          </p>
+        </div>
         <div className="mt-6">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--muted-foreground)]">Status</p>
           <div className="mt-2">
@@ -293,6 +314,7 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
               <TableRow>
                 <TableHead>Project</TableHead>
                 <TableHead>Project Manager</TableHead>
+                <TableHead>Start</TableHead>
                 <TableHead className="text-right">Monthly Hours</TableHead>
                 <TableHead className="text-right">Max Carryover</TableHead>
                 <TableHead>Status</TableHead>
@@ -307,6 +329,11 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
                     <TableRow key={project.id}>
                       <TableCell className="font-medium">{project.name}</TableCell>
                       <TableCell>{project.productionManager ?? "—"}</TableCell>
+                      <TableCell>
+                        {project.startYear && project.startMonth
+                          ? formatYearMonth(project.startYear, project.startMonth)
+                          : "—"}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">{formatHours(project.monthlyHours)}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatHours(project.maximumCarryoverHours)}</TableCell>
                       <TableCell>
@@ -335,6 +362,46 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
                     <TableRow key={project.id}>
                       <TableCell className="font-medium">{project.name}</TableCell>
                       <TableCell>{project.productionManager ?? "—"}</TableCell>
+                      <TableCell>
+                        {project.startYear && project.startMonth
+                          ? formatYearMonth(project.startYear, project.startMonth)
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatHours(project.monthlyHours)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatHours(project.maximumCarryoverHours)}</TableCell>
+                      <TableCell>
+                        <ActiveStatusSelect
+                          label={`Status for ${project.name}`}
+                          value={project.active}
+                          disabled={!canEdit || updatingStatusId === project.id}
+                          onChange={(active) => updateProjectStatus(project, active)}
+                        />
+                      </TableCell>
+                      {canEdit ? (
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => { setEditingProject(project); setProjectOpen(true); }}>
+                            Edit
+                          </Button>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  ))}
+                </>
+              ) : null}
+              {groupedProjects.capitalTimeAndMaterials.length > 0 ? (
+                <>
+                  <TableSectionRow colSpan={projectColSpan}>
+                    {PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS} ({groupedProjects.capitalTimeAndMaterials.length})
+                  </TableSectionRow>
+                  {groupedProjects.capitalTimeAndMaterials.map((project) => (
+                    <TableRow key={project.id}>
+                      <TableCell className="font-medium">{project.name}</TableCell>
+                      <TableCell>{project.productionManager ?? "—"}</TableCell>
+                      <TableCell>
+                        {project.startYear && project.startMonth
+                          ? formatYearMonth(project.startYear, project.startMonth)
+                          : "—"}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">{formatHours(project.monthlyHours)}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatHours(project.maximumCarryoverHours)}</TableCell>
                       <TableCell>
@@ -364,7 +431,7 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
       <ProjectFormDialog
         open={projectOpen}
         onOpenChange={setProjectOpen}
-        clients={[{ id: client.id, name: client.name }]}
+        clients={[{ id: client.id, name: client.name, currency: client.currency, devRate: client.devRate, pmRate: client.pmRate }]}
         defaultClientId={client.id}
         project={editingProject}
         onSaved={load}

@@ -52,4 +52,11 @@ describe("invoice report copy", () => {
     expect(text).toContain("MANAGED SERVICE (1)");
     expect(text).toContain("TIME & MATERIALS (1)");
   });
+
+  it("includes Capital-Time & Material cards in a separate section", () => {
+    const text = formatInvoiceReportText([], [], [{ ...tmRow, projectName: "Capital ERP", projectType: "CAPITAL_TIME_AND_MATERIALS" }]);
+    expect(text).toContain("CAPITAL-TIME & MATERIAL (1)");
+    expect(text).toContain("Project: Capital ERP");
+    expect(text).toContain("Development Hours: 12");
+  });
 });

@@ -1,16 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Clock3, Copy, Download, Gauge, Percent, Wallet } from "lucide-react";
+import { Clock3, Code2, Copy, Download, Gauge, Percent, User, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { currentYearMonth, formatYearMonth, shiftYearMonth, toYearMonthInput } from "@/lib/months";
+import { formatBurnRateReportHtml, formatBurnRateReportText, sortBurnProjects, type BurnProject, type BurnStatus, type BurnTotals } from "@/lib/burn-rate";
+import {
+  currentYearMonth,
+  detectMonthRangePreset,
+  formatYearMonth,
+  monthRangeForPreset,
+  shiftYearMonth,
+  toYearMonthInput,
+  type MonthRangePreset,
+} from "@/lib/months";
 import { appendQueryValues } from "@/lib/query-params";
-import { isManagedService } from "@/lib/calculations";
+import { isCapitalTimeAndMaterials, isManagedService, isTimeTrackedProject, PROJECT_TYPE_LABELS } from "@/lib/calculations";
 import { formatInvoiceReportHtml, formatInvoiceReportText } from "@/lib/invoice-copy";
-import { formatOverviewReportHtml, formatOverviewReportText } from "@/lib/overview-copy";
+import {
+  formatOverviewReportHtml,
+  formatOverviewReportText,
+  formatWeeklyStatusReportHtml,
+  formatWeeklyStatusReportText,
+} from "@/lib/overview-copy";
 import { partitionByProjectType } from "@/lib/time-hours";
 import { cn, formatHours, formatHoursUnit, nextMonthHint } from "@/lib/utils";
+import { BurnRateReport } from "@/components/burn-rate-report";
 import type { ClientRecord } from "@/components/clients-view";
 import type { ProjectRecord } from "@/components/project-form-dialog";
 import { Button } from "@/components/ui/button";
@@ -26,7 +41,7 @@ import { HoursRemaining } from "@/components/ui/hours-remaining";
 import { groupHeaderBgClass, ProjectTypeHeading } from "@/components/ui/project-type-heading";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type ReportType = "overview" | "invoice";
+type ReportType = "overview" | "invoice" | "weekly-status" | "burn-rate";
 
 type ReportRow = {
   year: number;
@@ -53,6 +68,20 @@ type ReportResponse = {
     averageMonthlyUsage: number;
     utilizationPercent: number;
   };
+  burnRate?: {
+    projects: BurnProject[];
+    totals: BurnTotals;
+  };
+};
+
+const EMPTY_BURN_TOTALS: BurnTotals = {
+  estimateHours: 0,
+  estimateCost: 0,
+  actualHours: 0,
+  actualSpend: 0,
+  remainingHours: 0,
+  remainingSpend: 0,
+  currency: null,
 };
 
 export function ReportsView() {
@@ -68,6 +97,9 @@ export function ReportsView() {
   const [end, setEnd] = useState(toYearMonthInput(current.year, current.month));
   const [report, setReport] = useState<ReportResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [burnStatusSavingId, setBurnStatusSavingId] = useState<string | null>(null);
+  const isWeeklyStatus = reportType === "weekly-status";
+  const isBurnRate = reportType === "burn-rate";
 
   useEffect(() => {
     Promise.all([
@@ -76,11 +108,19 @@ export function ReportsView() {
     ]).then(([clientResult, projectResult]) => {
       const activeClientIds = new Set(clientResult.clients.map((client) => client.id));
       setClients(clientResult.clients);
-      setProjects(projectResult.projects.filter((project) => activeClientIds.has(project.clientId)));
+      setProjects(
+        projectResult.projects.filter(
+          (project) => activeClientIds.has(project.clientId) && isTimeTrackedProject(project.type),
+        ),
+      );
     }).catch((error: Error) => toast.error(error.message));
   }, []);
 
-  const projectsForFilters = projects.filter((project) => !clientIds.length || clientIds.includes(project.clientId));
+  const projectsForFilters = projects.filter((project) => {
+    if (clientIds.length && !clientIds.includes(project.clientId)) return false;
+    if (isBurnRate) return isCapitalTimeAndMaterials(project.type);
+    return true;
+  });
   const managerOptions = useMemo(() => {
     const names = [...new Set(
       projectsForFilters
@@ -92,7 +132,7 @@ export function ReportsView() {
       ...(hasUnassigned ? [{ value: "unassigned", label: "Unassigned" }] : []),
       ...names.map((name) => ({ value: name, label: name })),
     ];
-  }, [projects, clientIds]);
+  }, [projects, clientIds, isBurnRate]);
   const filteredProjects = projectsForFilters.filter((project) => {
     if (!managerFilter.length) return true;
     return managerFilter.includes(project.productionManager ?? "unassigned");
@@ -103,25 +143,52 @@ export function ReportsView() {
     return { year, month };
   }
 
-  function reportParams() {
-    const from = parse(start);
-    const to = parse(end);
+  function applyMonthRangePreset(preset: MonthRangePreset) {
+    if (preset === "custom") return;
+    const range = monthRangeForPreset(preset);
+    setStart(range.start);
+    setEnd(range.end);
+  }
+
+  function reportParams(overrides?: {
+    start?: string;
+    end?: string;
+    clientIds?: string[];
+    projectIds?: string[];
+    managerFilter?: string[];
+    reportType?: ReportType;
+  }) {
+    const type = overrides?.reportType ?? reportType;
+    const startValue = overrides?.start ?? start;
+    const endValue = type === "weekly-status" ? startValue : (overrides?.end ?? end);
+    const from = parse(startValue);
+    const to = parse(endValue);
+    const selectedClients = overrides?.clientIds ?? clientIds;
+    const selectedProjects = type === "weekly-status" ? [] : (overrides?.projectIds ?? projectIds);
+    const selectedManagers = type === "weekly-status" ? [] : (overrides?.managerFilter ?? managerFilter);
     const params = new URLSearchParams({
       startYear: String(from.year),
       startMonth: String(from.month),
       endYear: String(to.year),
       endMonth: String(to.month),
+      reportType: type,
     });
-    appendQueryValues(params, "clientId", clientIds);
-    appendQueryValues(params, "projectId", projectIds);
-    appendQueryValues(params, "productionManager", managerFilter);
+    appendQueryValues(params, "clientId", selectedClients);
+    appendQueryValues(params, "projectId", selectedProjects);
+    appendQueryValues(params, "productionManager", selectedManagers);
     return params;
   }
 
-  async function run() {
+  async function run(overrides?: Parameters<typeof reportParams>[0]) {
+    const type = overrides?.reportType ?? reportType;
+    const selectedClients = overrides?.clientIds ?? clientIds;
+    if (type === "weekly-status" && !selectedClients[0]) {
+      toast.error("Select a client.");
+      return;
+    }
     setLoading(true);
     try {
-      const result = await api<ReportResponse>(`/api/reports?${reportParams().toString()}`);
+      const result = await api<ReportResponse>(`/api/reports?${reportParams(overrides).toString()}`);
       setReport(result);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Unable to build report.");
@@ -134,6 +201,85 @@ export function ReportsView() {
     const params = reportParams();
     params.set("format", format);
     return `/api/reports/export?${params.toString()}`;
+  }
+
+  function handleReportTypeChange(next: ReportType) {
+    setReportType(next);
+    if (next === "weekly-status") {
+      const month = end;
+      setStart(month);
+      const selected = clientIds.length === 1 ? clientIds[0] : "";
+      const nextClients = selected ? [selected] : [];
+      setClientIds(nextClients);
+      setProjectIds([]);
+      setManagerFilter([]);
+      if (!nextClients[0]) return;
+      void run({
+        reportType: next,
+        start: month,
+        end: month,
+        clientIds: nextClients,
+        projectIds: [],
+        managerFilter: [],
+      });
+      return;
+    }
+    const capitalProjectIds = projectIds.filter((id) => {
+      const project = projects.find((item) => item.id === id);
+      return project != null && isCapitalTimeAndMaterials(project.type);
+    });
+    const nextProjectIds = next === "burn-rate" ? capitalProjectIds : projectIds;
+    if (next === "burn-rate") {
+      setProjectIds(nextProjectIds);
+    }
+    if (next === "burn-rate" || reportType === "burn-rate") {
+      void run({ reportType: next, projectIds: nextProjectIds });
+    }
+  }
+
+  async function saveBurnStatus(projectId: string, status: BurnStatus) {
+    const previous = report?.burnRate?.projects.find((project) => project.projectId === projectId)?.total.status;
+    setReport((current) => {
+      if (!current?.burnRate) return current;
+      return {
+        ...current,
+        burnRate: {
+          ...current.burnRate,
+          projects: sortBurnProjects(
+            current.burnRate.projects.map((project) =>
+              project.projectId === projectId ? { ...project, total: { ...project.total, status } } : project,
+            ),
+          ),
+        },
+      };
+    });
+    setBurnStatusSavingId(projectId);
+    try {
+      await api(`/api/projects/${projectId}/burn-status`, {
+        method: "PATCH",
+        body: JSON.stringify({ burnStatus: status }),
+      });
+    } catch (error) {
+      if (previous) {
+        setReport((current) => {
+          if (!current?.burnRate) return current;
+          return {
+            ...current,
+            burnRate: {
+              ...current.burnRate,
+              projects: sortBurnProjects(
+                current.burnRate.projects.map((project) =>
+                  project.projectId === projectId ? { ...project, total: { ...project.total, status: previous } } : project,
+                ),
+              ),
+            },
+          };
+        });
+      }
+      toast.error(error instanceof Error ? error.message : "Unable to save status.");
+    } finally {
+      setBurnStatusSavingId(null);
+    }
   }
 
   useEffect(() => {
@@ -155,6 +301,34 @@ export function ReportsView() {
     () => partitionByProjectType(report?.rows ?? []),
     [report],
   );
+  const managedSummary = useMemo(() => {
+    const available = groupedRows.managed.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0);
+    const used = groupedRows.managed.reduce((sum, row) => sum + row.hoursUsed, 0);
+    const remaining = groupedRows.managed.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0);
+    return {
+      available,
+      used,
+      remaining,
+      utilization: available > 0 ? (used / available) * 100 : 0,
+    };
+  }, [groupedRows]);
+  const tmSummary = useMemo(() => ({
+    development: groupedRows.timeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0),
+    pm: groupedRows.timeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0),
+    total: groupedRows.timeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0),
+  }), [groupedRows]);
+  const capitalSummary = useMemo(() => ({
+    development: groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0),
+    pm: groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0),
+    total: groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0),
+  }), [groupedRows]);
+  const weeklyMonth = parse(start);
+  const weeklyClientName = clients.find((client) => client.id === clientIds[0])?.name
+    ?? report?.rows[0]?.clientName
+    ?? null;
+  const weeklyHeading = weeklyClientName
+    ? `${weeklyClientName} — ${formatYearMonth(weeklyMonth.year, weeklyMonth.month)}`
+    : null;
 
   return (
     <div>
@@ -165,12 +339,32 @@ export function ReportsView() {
           <>
             <Button
               variant="outline"
-              disabled={loading || !report?.rows.length}
-              onClick={() =>
-                reportType === "invoice"
-                  ? void copyInvoiceReport(groupedRows.managed, groupedRows.timeAndMaterials)
-                  : void copyOverviewReport(groupedRows.managed, groupedRows.timeAndMaterials)
-              }
+              disabled={loading || (isBurnRate ? !report?.burnRate?.projects.length : !report?.rows.length)}
+              onClick={() => {
+                if (reportType === "burn-rate") {
+                  void copyBurnRateReport(report?.burnRate?.projects ?? [], report?.burnRate?.totals ?? EMPTY_BURN_TOTALS);
+                  return;
+                }
+                if (reportType === "invoice") {
+                  void copyInvoiceReport(groupedRows.managed, groupedRows.timeAndMaterials, groupedRows.capitalTimeAndMaterials);
+                  return;
+                }
+                if (reportType === "weekly-status") {
+                  if (!report || !weeklyHeading) {
+                    toast.error("Nothing to copy.");
+                    return;
+                  }
+                  void copyWeeklyStatusReport(
+                    weeklyHeading,
+                    report.summary,
+                    groupedRows.managed,
+                    groupedRows.timeAndMaterials,
+                    groupedRows.capitalTimeAndMaterials,
+                  );
+                  return;
+                }
+                void copyOverviewReport(groupedRows.managed, groupedRows.timeAndMaterials, groupedRows.capitalTimeAndMaterials);
+              }}
             >
               <Copy />
               Copy
@@ -191,7 +385,7 @@ export function ReportsView() {
         }
       />
       <Card className="mb-5 p-4">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div className="space-y-1.5">
             <Label htmlFor="report-type">Report type</Label>
             <FilterSelect
@@ -199,12 +393,49 @@ export function ReportsView() {
               className="w-full"
               aria-label="Report type"
               value={reportType}
-              onChange={(event) => setReportType(event.target.value as ReportType)}
+              onChange={(event) => handleReportTypeChange(event.target.value as ReportType)}
             >
               <option value="overview">Overview</option>
               <option value="invoice">Invoice</option>
+              <option value="weekly-status">Weekly Status</option>
+              <option value="burn-rate">Burn Rate</option>
             </FilterSelect>
           </div>
+          {isWeeklyStatus ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="weekly-client">Client</Label>
+                <FilterSelect
+                  id="weekly-client"
+                  className="w-full"
+                  aria-label="Client"
+                  value={clientIds[0] ?? ""}
+                  onChange={(event) => setClientIds(event.target.value ? [event.target.value] : [])}
+                >
+                  <option value="">Select a client</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.name}
+                    </option>
+                  ))}
+                </FilterSelect>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="weekly-month">Month</Label>
+                <input
+                  id="weekly-month"
+                  type="month"
+                  className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 text-sm"
+                  value={start}
+                  onChange={(event) => {
+                    setStart(event.target.value);
+                    setEnd(event.target.value);
+                  }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
           <div className="space-y-1.5">
             <Label>Client</Label>
             <FilterMultiSelect
@@ -264,6 +495,20 @@ export function ReportsView() {
             />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="report-range">Range</Label>
+            <FilterSelect
+              id="report-range"
+              className="w-full"
+              aria-label="Date range"
+              value={detectMonthRangePreset(start, end)}
+              onChange={(event) => applyMonthRangePreset(event.target.value as MonthRangePreset)}
+            >
+              <option value="custom">Custom range</option>
+              <option value="current">Current month</option>
+              <option value="previous">Previous month</option>
+            </FilterSelect>
+          </div>
+          <div className="space-y-1.5">
             <Label>From</Label>
             <input type="month" className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 text-sm" value={start} onChange={(event) => setStart(event.target.value)} />
           </div>
@@ -271,12 +516,19 @@ export function ReportsView() {
             <Label>To</Label>
             <input type="month" className="h-10 w-full rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface)] px-3 text-sm" value={end} onChange={(event) => setEnd(event.target.value)} />
           </div>
+            </>
+          )}
           <div className="flex items-end">
-            <Button onClick={run}>Run report</Button>
+            <Button onClick={() => void run()}>Run report</Button>
           </div>
         </div>
       </Card>
-      {report ? (
+      {isWeeklyStatus && weeklyHeading ? (
+        <h2 className="mb-4 text-[var(--text-section)] font-semibold tracking-tight text-[var(--foreground)]">
+          {weeklyHeading}
+        </h2>
+      ) : null}
+      {report && reportType !== "overview" && reportType !== "burn-rate" ? (
         <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard title="Total Available" value={formatHoursUnit(report.summary.totalAvailableHours)} icon={Wallet} />
           <SummaryCard title="Total Used" value={formatHoursUnit(report.summary.totalUsedHours)} icon={Clock3} />
@@ -286,7 +538,7 @@ export function ReportsView() {
             icon={Gauge}
             tone={report.summary.totalRemainingHours < 0 ? "danger" : "success"}
           />
-          <SummaryCard title="Utilization" value={`${formatHours(report.summary.utilizationPercent)}%`} icon={Percent} />
+          <SummaryCard title="Utilization" value={`${formatHours(report.summary.utilizationPercent)}%`} icon={Percent} tone={report.summary.utilizationPercent > 100 ? "danger" : "default"} />
         </div>
       ) : null}
       {reportType === "overview" ? (
@@ -315,24 +567,57 @@ export function ReportsView() {
         <Card className="overflow-hidden">
           <TableSkeleton />
         </Card>
+      ) : isBurnRate ? (
+        <BurnRateReport
+          projects={report?.burnRate?.projects ?? []}
+          totals={report?.burnRate?.totals ?? EMPTY_BURN_TOTALS}
+          statusSavingId={burnStatusSavingId}
+          onStatusChange={(projectId, status) => void saveBurnStatus(projectId, status)}
+        />
       ) : !report?.rows.length ? (
         <Card className="overflow-hidden">
           <EmptyState title="No report rows" description="Adjust filters or add time entries first." />
         </Card>
       ) : reportType === "invoice" ? (
-        <InvoiceReportCards managed={groupedRows.managed} timeAndMaterials={groupedRows.timeAndMaterials} />
+        <InvoiceReportCards
+          managed={groupedRows.managed}
+          timeAndMaterials={groupedRows.timeAndMaterials}
+          capitalTimeAndMaterials={groupedRows.capitalTimeAndMaterials}
+        />
       ) : (
         <div className="space-y-5">
           {groupedRows.managed.length > 0 ? (
             <Card className="overflow-hidden">
               <ProjectTypeHeading title="Managed Service" count={groupedRows.managed.length} />
+              {reportType === "overview" ? (
+                <div className="grid gap-3 border-b border-[var(--border)] p-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <SummaryCard title="Total Available" value={formatHoursUnit(managedSummary.available)} icon={Wallet} />
+                  <SummaryCard title="Total Used" value={formatHoursUnit(managedSummary.used)} icon={Clock3} />
+                  <SummaryCard
+                    title="Total Remaining"
+                    value={formatHoursUnit(managedSummary.remaining)}
+                    icon={Gauge}
+                    tone={managedSummary.remaining < 0 ? "danger" : "success"}
+                  />
+                  <SummaryCard
+                    title="Utilization"
+                    value={`${formatHours(managedSummary.utilization)}%`}
+                    icon={Percent}
+                    tone={managedSummary.utilization > 100 ? "danger" : "default"}
+                  />
+                </div>
+              ) : null}
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Month</TableHead>
-                    <TableHead>Client</TableHead>
+                    {isWeeklyStatus ? null : (
+                      <>
+                        <TableHead>Month</TableHead>
+                        <TableHead>Client</TableHead>
+                      </>
+                    )}
                     <TableHead>Project</TableHead>
-                    <TableHead>Project Manager</TableHead>
+                    {isWeeklyStatus ? null : <TableHead>Project Manager</TableHead>}
                     <TableHead className="text-right">Available</TableHead>
                     <TableHead className="text-right">Used</TableHead>
                     <TableHead className="text-right">Remaining</TableHead>
@@ -342,10 +627,14 @@ export function ReportsView() {
                 <TableBody>
                   {groupedRows.managed.map((row, index) => (
                     <TableRow key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`}>
-                      <TableCell>{formatYearMonth(row.year, row.month)}</TableCell>
-                      <TableCell>{row.clientName}</TableCell>
+                      {isWeeklyStatus ? null : (
+                        <>
+                          <TableCell>{formatYearMonth(row.year, row.month)}</TableCell>
+                          <TableCell>{row.clientName}</TableCell>
+                        </>
+                      )}
                       <TableCell>{row.projectName}</TableCell>
-                      <TableCell>{row.productionManager ?? "—"}</TableCell>
+                      {isWeeklyStatus ? null : <TableCell>{row.productionManager ?? "—"}</TableCell>}
                       <TableCell className="text-right tabular-nums">{formatHours(row.hoursAvailable)}</TableCell>
                       <TableCell className="text-right tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
                       <TableCell className="text-right">
@@ -354,7 +643,7 @@ export function ReportsView() {
                       <TableCell className="text-right">
                         <div className="font-medium tabular-nums">{formatHours(row.hoursForNextMonth)}</div>
                         {nextMonthHint(row) ? (
-                          <div className="text-[11px] text-[var(--primary)]">{nextMonthHint(row)}</div>
+                          <div className="text-[calc(11px+1pt)] text-[var(--primary)]">{nextMonthHint(row)}</div>
                         ) : null}
                       </TableCell>
                     </TableRow>
@@ -364,35 +653,22 @@ export function ReportsView() {
             </Card>
           ) : null}
           {groupedRows.timeAndMaterials.length > 0 ? (
-            <Card className="overflow-hidden">
-              <ProjectTypeHeading title="Time & Materials" count={groupedRows.timeAndMaterials.length} />
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Month</TableHead>
-                    <TableHead>Client</TableHead>
-                    <TableHead>Project</TableHead>
-                    <TableHead>Project Manager</TableHead>
-                    <TableHead className="text-right">Development Hours</TableHead>
-                    <TableHead className="text-right">PM Hours</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {groupedRows.timeAndMaterials.map((row, index) => (
-                    <TableRow key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`}>
-                      <TableCell>{formatYearMonth(row.year, row.month)}</TableCell>
-                      <TableCell>{row.clientName}</TableCell>
-                      <TableCell>{row.projectName}</TableCell>
-                      <TableCell>{row.productionManager ?? "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatHours(row.developmentHours)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatHours(row.pmHours)}</TableCell>
-                      <TableCell className="text-right font-medium tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </Card>
+            <ReportSplitHoursCard
+              title="Time & Materials"
+              rows={groupedRows.timeAndMaterials}
+              summary={tmSummary}
+              reportType={reportType}
+              isWeeklyStatus={isWeeklyStatus}
+            />
+          ) : null}
+          {groupedRows.capitalTimeAndMaterials.length > 0 ? (
+            <ReportSplitHoursCard
+              title={PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS}
+              rows={groupedRows.capitalTimeAndMaterials}
+              summary={capitalSummary}
+              reportType={reportType}
+              isWeeklyStatus={isWeeklyStatus}
+            />
           ) : null}
         </div>
       )}
@@ -400,12 +676,75 @@ export function ReportsView() {
   );
 }
 
+function ReportSplitHoursCard({
+  title,
+  rows,
+  summary,
+  reportType,
+  isWeeklyStatus,
+}: {
+  title: string;
+  rows: ReportRow[];
+  summary: { development: number; pm: number; total: number };
+  reportType: ReportType;
+  isWeeklyStatus: boolean;
+}) {
+  return (
+    <Card className="overflow-hidden">
+      <ProjectTypeHeading title={title} count={rows.length} />
+      {reportType === "overview" ? (
+        <div className="grid gap-3 border-b border-[var(--border)] p-4 sm:grid-cols-3">
+          <SummaryCard title="Dev Hours Used" value={formatHoursUnit(summary.development)} icon={Code2} />
+          <SummaryCard title="PM Hours Used" value={formatHoursUnit(summary.pm)} icon={User} />
+          <SummaryCard title="Total Hours Used" value={formatHoursUnit(summary.total)} icon={Clock3} />
+        </div>
+      ) : null}
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {isWeeklyStatus ? null : (
+              <>
+                <TableHead>Month</TableHead>
+                <TableHead>Client</TableHead>
+              </>
+            )}
+            <TableHead>Project</TableHead>
+            {isWeeklyStatus ? null : <TableHead>Project Manager</TableHead>}
+            <TableHead className="text-right">Development Hours</TableHead>
+            <TableHead className="text-right">PM Hours</TableHead>
+            <TableHead className="text-right">Total</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((row, index) => (
+            <TableRow key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`}>
+              {isWeeklyStatus ? null : (
+                <>
+                  <TableCell>{formatYearMonth(row.year, row.month)}</TableCell>
+                  <TableCell>{row.clientName}</TableCell>
+                </>
+              )}
+              <TableCell>{row.projectName}</TableCell>
+              {isWeeklyStatus ? null : <TableCell>{row.productionManager ?? "—"}</TableCell>}
+              <TableCell className="text-right tabular-nums">{formatHours(row.developmentHours)}</TableCell>
+              <TableCell className="text-right tabular-nums">{formatHours(row.pmHours)}</TableCell>
+              <TableCell className="text-right font-medium tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </Card>
+  );
+}
+
 function InvoiceReportCards({
   managed,
   timeAndMaterials,
+  capitalTimeAndMaterials,
 }: {
   managed: ReportRow[];
   timeAndMaterials: ReportRow[];
+  capitalTimeAndMaterials: ReportRow[];
 }) {
   return (
     <div className="space-y-6">
@@ -428,6 +767,18 @@ function InvoiceReportCards({
           </Card>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {timeAndMaterials.map((row, index) => (
+              <InvoiceProjectCard key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`} row={row} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+      {capitalTimeAndMaterials.length > 0 ? (
+        <section>
+          <Card className="mb-3 overflow-hidden">
+            <ProjectTypeHeading title={PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS} count={capitalTimeAndMaterials.length} />
+          </Card>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {capitalTimeAndMaterials.map((row, index) => (
               <InvoiceProjectCard key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`} row={row} />
             ))}
           </div>
@@ -461,7 +812,7 @@ function InvoiceProjectCard({ row }: { row: ReportRow }) {
             </InvoiceMetric>
             <InvoiceMetric label="Next Month">
               <p className="font-medium tabular-nums">{formatHours(row.hoursForNextMonth)}</p>
-              {hint ? <p className="text-[11px] text-[var(--primary)]">{hint}</p> : null}
+              {hint ? <p className="text-[calc(11px+1pt)] text-[var(--primary)]">{hint}</p> : null}
             </InvoiceMetric>
           </>
         ) : (
@@ -494,19 +845,19 @@ function InvoiceHeaderLine({ label, value }: { label: string; value: string }) {
 function InvoiceMetric({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1">
-      <p className="text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--muted-foreground)]">{label}</p>
+      <p className="text-[calc(11px+1pt)] font-medium uppercase tracking-[0.04em] text-[var(--muted-foreground)]">{label}</p>
       <div>{children}</div>
     </div>
   );
 }
 
-async function copyOverviewReport(managed: ReportRow[], timeAndMaterials: ReportRow[]) {
-  const text = formatOverviewReportText(managed, timeAndMaterials);
+async function copyBurnRateReport(projects: BurnProject[], totals: BurnTotals) {
+  const text = formatBurnRateReportText(projects, totals);
   if (!text) {
     toast.error("Nothing to copy.");
     return;
   }
-  const html = formatOverviewReportHtml(managed, timeAndMaterials);
+  const html = formatBurnRateReportHtml(projects, totals);
   try {
     await copyTextAndHtml(text, html);
     toast.success("Report copied.");
@@ -515,13 +866,57 @@ async function copyOverviewReport(managed: ReportRow[], timeAndMaterials: Report
   }
 }
 
-async function copyInvoiceReport(managed: ReportRow[], timeAndMaterials: ReportRow[]) {
-  const text = formatInvoiceReportText(managed, timeAndMaterials);
+async function copyWeeklyStatusReport(
+  heading: string,
+  summary: ReportResponse["summary"],
+  managed: ReportRow[],
+  timeAndMaterials: ReportRow[],
+  capitalTimeAndMaterials: ReportRow[],
+) {
+  const text = formatWeeklyStatusReportText(heading, summary, managed, timeAndMaterials, capitalTimeAndMaterials);
   if (!text) {
     toast.error("Nothing to copy.");
     return;
   }
-  const html = formatInvoiceReportHtml(managed, timeAndMaterials);
+  const html = formatWeeklyStatusReportHtml(heading, summary, managed, timeAndMaterials, capitalTimeAndMaterials);
+  try {
+    await copyTextAndHtml(text, html);
+    toast.success("Report copied.");
+  } catch {
+    toast.error("Unable to copy report.");
+  }
+}
+
+async function copyOverviewReport(
+  managed: ReportRow[],
+  timeAndMaterials: ReportRow[],
+  capitalTimeAndMaterials: ReportRow[],
+) {
+  const text = formatOverviewReportText(managed, timeAndMaterials, capitalTimeAndMaterials);
+  if (!text) {
+    toast.error("Nothing to copy.");
+    return;
+  }
+  const html = formatOverviewReportHtml(managed, timeAndMaterials, capitalTimeAndMaterials);
+  try {
+    await copyTextAndHtml(text, html);
+    toast.success("Report copied.");
+  } catch {
+    toast.error("Unable to copy report.");
+  }
+}
+
+async function copyInvoiceReport(
+  managed: ReportRow[],
+  timeAndMaterials: ReportRow[],
+  capitalTimeAndMaterials: ReportRow[],
+) {
+  const text = formatInvoiceReportText(managed, timeAndMaterials, capitalTimeAndMaterials);
+  if (!text) {
+    toast.error("Nothing to copy.");
+    return;
+  }
+  const html = formatInvoiceReportHtml(managed, timeAndMaterials, capitalTimeAndMaterials);
   try {
     await copyTextAndHtml(text, html);
     toast.success("Invoice details copied.");

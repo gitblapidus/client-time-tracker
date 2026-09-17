@@ -7,6 +7,14 @@ function d(year: number, month: number, day = 1) {
   return new Date(Date.UTC(year, month - 1, day, 12));
 }
 
+function startAt(year: number, month: number) {
+  return {
+    startYear: year,
+    startMonth: month,
+    createdAt: d(year, month),
+  };
+}
+
 async function upsertEntries(
   projectId: string,
   adminId: string,
@@ -160,7 +168,7 @@ async function main() {
       maximumCarryoverHours: 40,
       productionManager: "Morgan Blake",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
     create: {
       clientId: acme.id,
@@ -170,7 +178,7 @@ async function main() {
       maximumCarryoverHours: 40,
       productionManager: "Morgan Blake",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
   });
 
@@ -182,7 +190,7 @@ async function main() {
       maximumCarryoverHours: null,
       productionManager: "Chris Diaz",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
     create: {
       clientId: acme.id,
@@ -192,7 +200,7 @@ async function main() {
       maximumCarryoverHours: null,
       productionManager: "Chris Diaz",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
   });
 
@@ -204,7 +212,7 @@ async function main() {
       maximumCarryoverHours: 20,
       productionManager: "Sam Patel",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
     create: {
       clientId: northwind.id,
@@ -214,7 +222,7 @@ async function main() {
       maximumCarryoverHours: 20,
       productionManager: "Sam Patel",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
   });
 
@@ -226,7 +234,7 @@ async function main() {
       maximumCarryoverHours: null,
       productionManager: "Chris Diaz",
       active: true,
-      createdAt: d(2026, 2),
+      ...startAt(2026, 2),
     },
     create: {
       clientId: northwind.id,
@@ -236,7 +244,7 @@ async function main() {
       maximumCarryoverHours: null,
       productionManager: "Chris Diaz",
       active: true,
-      createdAt: d(2026, 2),
+      ...startAt(2026, 2),
     },
   });
 
@@ -248,7 +256,7 @@ async function main() {
       maximumCarryoverHours: 30,
       productionManager: "Morgan Blake",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
     create: {
       clientId: globex.id,
@@ -258,7 +266,7 @@ async function main() {
       maximumCarryoverHours: 30,
       productionManager: "Morgan Blake",
       active: true,
-      createdAt: d(2026, 1),
+      ...startAt(2026, 1),
     },
   });
 
@@ -270,7 +278,7 @@ async function main() {
       maximumCarryoverHours: null,
       productionManager: "Sam Patel",
       active: true,
-      createdAt: d(2026, 3),
+      ...startAt(2026, 3),
     },
     create: {
       clientId: globex.id,
@@ -280,7 +288,7 @@ async function main() {
       maximumCarryoverHours: null,
       productionManager: "Sam Patel",
       active: true,
-      createdAt: d(2026, 3),
+      ...startAt(2026, 3),
     },
   });
 
@@ -291,7 +299,7 @@ async function main() {
       monthlyHours: 10,
       maximumCarryoverHours: 10,
       active: false,
-      createdAt: d(2025, 10),
+      ...startAt(2025, 10),
     },
     create: {
       clientId: initech.id,
@@ -300,7 +308,7 @@ async function main() {
       monthlyHours: 10,
       maximumCarryoverHours: 10,
       active: false,
-      createdAt: d(2025, 10),
+      ...startAt(2025, 10),
     },
   });
 
