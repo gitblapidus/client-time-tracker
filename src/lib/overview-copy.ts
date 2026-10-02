@@ -1,5 +1,6 @@
 import { formatYearMonth } from "@/lib/months";
-import { PROJECT_TYPE_LABELS } from "@/lib/calculations";
+import { PROJECT_TYPE_LABELS, roundHours } from "@/lib/calculations";
+import { formatGroupingSpend, formatMoney, sumGroupingSpend } from "@/lib/burn-rate";
 import { formatHours, formatSignedHours, nextMonthHint } from "@/lib/utils";
 
 export type OverviewCopyRow = {
@@ -16,6 +17,8 @@ export type OverviewCopyRow = {
   pmHours: number | null;
   hoursRemaining: number | null;
   hoursForNextMonth: number | null;
+  currency?: string | null;
+  totalSpend?: number | null;
 };
 
 const INK = "#0f1c2e";
@@ -35,7 +38,11 @@ const FONT = "Arial, Helvetica, sans-serif";
 const managedHeaders = ["Month", "Client", "Project", "Project Manager", "Available", "Used", "Remaining", "Next Month"];
 const tmHeaders = ["Month", "Client", "Project", "Project Manager", "Development Hours", "PM Hours", "Total"];
 const weeklyManagedHeaders = ["Project", "Available", "Used", "Remaining", "Next Month"];
-const weeklyTmHeaders = ["Project", "Development Hours", "PM Hours", "Total"];
+const weeklyManagedHeadersWithClient = ["Client", "Project", "Available", "Used", "Remaining", "Next Month"];
+const weeklyTmSpendHeaders = ["Project", "Development Hours", "PM Hours", "Total", "Total Spend"];
+const weeklyTmSpendHeadersWithClient = ["Client", "Project", "Development Hours", "PM Hours", "Total", "Total Spend"];
+const WEEKLY_TM_SPEND_WIDTHS = ["36%", "16%", "14%", "14%", "20%"];
+const WEEKLY_TM_SPEND_WIDTHS_WITH_CLIENT = ["20%", "22%", "14%", "12%", "12%", "20%"];
 
 export type WeeklyStatusSummary = {
   totalAvailableHours: number;
@@ -100,7 +107,10 @@ export function formatWeeklyStatusReportText(
   managed: OverviewCopyRow[],
   timeAndMaterials: OverviewCopyRow[],
   capitalTimeAndMaterials: OverviewCopyRow[] = [],
+  includeClient = false,
 ): string {
+  const managedHeaders = includeClient ? weeklyManagedHeadersWithClient : weeklyManagedHeaders;
+  const tmHeaders = includeClient ? weeklyTmSpendHeadersWithClient : weeklyTmSpendHeaders;
   const sections = [
     heading,
     "",
@@ -114,19 +124,19 @@ export function formatWeeklyStatusReportText(
   if (managed.length > 0) {
     sections.push(
       "",
-      `MANAGED SERVICE (${managed.length})\n${tsv([weeklyManagedHeaders, ...managed.map(weeklyManagedTextRow)])}`,
+      `MANAGED SERVICE (${managed.length})\n${tsv([managedHeaders, ...managed.map((row) => weeklyManagedTextRow(row, includeClient)), weeklyManagedTotalTextRow(managed, includeClient)])}`,
     );
   }
   if (timeAndMaterials.length > 0) {
     sections.push(
       "",
-      `TIME & MATERIALS (${timeAndMaterials.length})\n${tsv([weeklyTmHeaders, ...timeAndMaterials.map(weeklyTmTextRow)])}`,
+      `TIME & MATERIALS (${timeAndMaterials.length})\n${tsv([tmHeaders, ...timeAndMaterials.map((row) => weeklyTmSpendTextRow(row, includeClient)), weeklyTmSpendTotalTextRow(timeAndMaterials, includeClient)])}`,
     );
   }
   if (capitalTimeAndMaterials.length > 0) {
     sections.push(
       "",
-      `${PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS.toUpperCase()} (${capitalTimeAndMaterials.length})\n${tsv([weeklyTmHeaders, ...capitalTimeAndMaterials.map(weeklyTmTextRow)])}`,
+      `${PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS.toUpperCase()} (${capitalTimeAndMaterials.length})\n${tsv([tmHeaders, ...capitalTimeAndMaterials.map((row) => weeklyTmSpendTextRow(row, includeClient)), weeklyTmSpendTotalTextRow(capitalTimeAndMaterials, includeClient)])}`,
     );
   }
   return sections.join("\n").trim();
@@ -138,7 +148,12 @@ export function formatWeeklyStatusReportHtml(
   managed: OverviewCopyRow[],
   timeAndMaterials: OverviewCopyRow[],
   capitalTimeAndMaterials: OverviewCopyRow[] = [],
+  includeClient = false,
 ): string {
+  const managedHeaders = includeClient ? weeklyManagedHeadersWithClient : weeklyManagedHeaders;
+  const tmHeaders = includeClient ? weeklyTmSpendHeadersWithClient : weeklyTmSpendHeaders;
+  const tmWidths = includeClient ? WEEKLY_TM_SPEND_WIDTHS_WITH_CLIENT : WEEKLY_TM_SPEND_WIDTHS;
+  const numericCols = includeClient ? [2, 3, 4, 5] : [1, 2, 3, 4];
   const parts = [
     `<tr><td style="font-size:20px;font-weight:700;color:${INK};padding:0 0 12px;">${escapeHtml(heading)}</td></tr>`,
     `<tr><td>
@@ -151,19 +166,38 @@ export function formatWeeklyStatusReportHtml(
     </td></tr>`,
   ];
   if (managed.length > 0) {
-    parts.push(sectionTableHtml("Managed Service", managed.length, weeklyManagedHeaders, managed.map(weeklyManagedHtmlRow), [1, 2, 3, 4]));
+    parts.push(sectionTableHtml(
+      "Managed Service",
+      managed.length,
+      managedHeaders,
+      [...managed.map((row) => weeklyManagedHtmlRow(row, includeClient)), weeklyManagedTotalHtmlRow(managed, includeClient)],
+      numericCols,
+      true,
+    ));
   }
   if (timeAndMaterials.length > 0) {
-    parts.push(sectionTableHtml("Time & Materials", timeAndMaterials.length, weeklyTmHeaders, timeAndMaterials.map(weeklyTmHtmlRow), [1, 2, 3]));
+    parts.push(
+      sectionTableHtml(
+        "Time & Materials",
+        timeAndMaterials.length,
+        tmHeaders,
+        [...timeAndMaterials.map((row) => weeklyTmSpendHtmlRow(row, includeClient)), weeklyTmSpendTotalHtmlRow(timeAndMaterials, includeClient)],
+        numericCols,
+        true,
+        tmWidths,
+      ),
+    );
   }
   if (capitalTimeAndMaterials.length > 0) {
     parts.push(
       sectionTableHtml(
         PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS,
         capitalTimeAndMaterials.length,
-        weeklyTmHeaders,
-        capitalTimeAndMaterials.map(weeklyTmHtmlRow),
-        [1, 2, 3],
+        tmHeaders,
+        [...capitalTimeAndMaterials.map((row) => weeklyTmSpendHtmlRow(row, includeClient)), weeklyTmSpendTotalHtmlRow(capitalTimeAndMaterials, includeClient)],
+        numericCols,
+        true,
+        tmWidths,
       ),
     );
   }
@@ -226,24 +260,91 @@ function tmHtmlRow(row: OverviewCopyRow): string[] {
   ];
 }
 
-function weeklyManagedTextRow(row: OverviewCopyRow): string[] {
+function weeklyManagedTextRow(row: OverviewCopyRow, includeClient = false): string[] {
   const full = managedTextRow(row);
-  return [full[2], full[4], full[5], full[6], full[7]];
+  const compact = [full[2], full[4], full[5], full[6], full[7]];
+  return includeClient ? [full[1], ...compact] : compact;
 }
 
-function weeklyTmTextRow(row: OverviewCopyRow): string[] {
+function weeklyTmTextRow(row: OverviewCopyRow, includeClient = false): string[] {
   const full = tmTextRow(row);
-  return [full[2], full[4], full[5], full[6]];
+  const compact = [full[2], full[4], full[5], full[6]];
+  return includeClient ? [full[1], ...compact] : compact;
 }
 
-function weeklyManagedHtmlRow(row: OverviewCopyRow): string[] {
+function weeklyTmSpendTextRow(row: OverviewCopyRow, includeClient = false): string[] {
+  return [...weeklyTmTextRow(row, includeClient), formatMoney(row.totalSpend, row.currency)];
+}
+
+function weeklyManagedHtmlRow(row: OverviewCopyRow, includeClient = false): string[] {
   const full = managedHtmlRow(row);
-  return [full[2], full[4], full[5], full[6], full[7]];
+  const compact = [full[2], full[4], full[5], full[6], full[7]];
+  return includeClient ? [full[1], ...compact] : compact;
 }
 
-function weeklyTmHtmlRow(row: OverviewCopyRow): string[] {
+function weeklyTmHtmlRow(row: OverviewCopyRow, includeClient = false): string[] {
   const full = tmHtmlRow(row);
-  return [full[2], full[4], full[5], full[6]];
+  const compact = [full[2], full[4], full[5], full[6]];
+  return includeClient ? [full[1], ...compact] : compact;
+}
+
+function weeklyTmSpendHtmlRow(row: OverviewCopyRow, includeClient = false): string[] {
+  const full = weeklyTmHtmlRow(row, includeClient);
+  return [...full, escapeHtml(formatMoney(row.totalSpend, row.currency))];
+}
+
+function weeklyManagedTotals(rows: OverviewCopyRow[]) {
+  return {
+    available: roundHours(rows.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0)),
+    used: roundHours(rows.reduce((sum, row) => sum + row.hoursUsed, 0)),
+    remaining: roundHours(rows.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0)),
+    nextMonth: roundHours(rows.reduce((sum, row) => sum + (row.hoursForNextMonth ?? 0), 0)),
+  };
+}
+
+function weeklyTmSpendTotals(rows: OverviewCopyRow[]) {
+  return {
+    development: roundHours(rows.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0)),
+    pm: roundHours(rows.reduce((sum, row) => sum + (row.pmHours ?? 0), 0)),
+    total: roundHours(rows.reduce((sum, row) => sum + row.hoursUsed, 0)),
+    ...sumGroupingSpend(rows),
+  };
+}
+
+function weeklyManagedTotalTextRow(rows: OverviewCopyRow[], includeClient = false): string[] {
+  const totals = weeklyManagedTotals(rows);
+  const compact = ["Total", cell(totals.available), cell(totals.used), remainingText(totals.remaining), cell(totals.nextMonth)];
+  return includeClient ? ["", ...compact] : compact;
+}
+
+function weeklyTmSpendTotalTextRow(rows: OverviewCopyRow[], includeClient = false): string[] {
+  const totals = weeklyTmSpendTotals(rows);
+  const compact = ["Total", cell(totals.development), cell(totals.pm), cell(totals.total), formatGroupingSpend(rows)];
+  return includeClient ? ["", ...compact] : compact;
+}
+
+function weeklyManagedTotalHtmlRow(rows: OverviewCopyRow[], includeClient = false): string[] {
+  const totals = weeklyManagedTotals(rows);
+  const compact = [
+    "Total",
+    escapeHtml(cell(totals.available)),
+    escapeHtml(cell(totals.used)),
+    remainingBadgeHtml(totals.remaining),
+    escapeHtml(cell(totals.nextMonth)),
+  ];
+  return includeClient ? ["", ...compact] : compact;
+}
+
+function weeklyTmSpendTotalHtmlRow(rows: OverviewCopyRow[], includeClient = false): string[] {
+  const totals = weeklyTmSpendTotals(rows);
+  const compact = [
+    "Total",
+    escapeHtml(cell(totals.development)),
+    escapeHtml(cell(totals.pm)),
+    escapeHtml(cell(totals.total)),
+    escapeHtml(formatGroupingSpend(rows)),
+  ];
+  return includeClient ? ["", ...compact] : compact;
 }
 
 function summaryHtmlRow(label: string, value: string): string {
@@ -259,27 +360,41 @@ function sectionTableHtml(
   headers: string[],
   rows: string[][],
   numericCols: number[],
+  emphasizeLastRow = false,
+  columnWidths?: string[],
 ) {
   const numeric = new Set(numericCols);
+  const lastIndex = rows.length - 1;
+  const colgroup = columnWidths?.length
+    ? `<colgroup>${columnWidths.map((width) => `<col width="${escapeHtml(width)}" style="width:${escapeHtml(width)};" />`).join("")}</colgroup>`
+    : "";
   const head = headers
     .map((header, index) => {
       const align = numeric.has(index) ? "right" : "left";
-      return `<th style="padding:8px 12px;text-align:${align};font-size:12px;font-weight:700;color:${NAVY};border-bottom:1px solid ${BORDER};white-space:nowrap;">${escapeHtml(header)}</th>`;
+      const width = columnWidths?.[index];
+      const widthAttr = width ? ` width="${escapeHtml(width)}"` : "";
+      const widthStyle = width ? `width:${width};` : "";
+      return `<th${widthAttr} style="padding:8px 12px;text-align:${align};font-size:12px;font-weight:700;color:${NAVY};border-bottom:1px solid ${BORDER};${widthStyle}">${escapeHtml(header)}</th>`;
     })
     .join("");
   const body = rows
-    .map(
-      (row) =>
-        `<tr>${row
-          .map((value, index) => {
-            const align = numeric.has(index) ? "right" : "left";
-            return `<td style="padding:8px 12px;text-align:${align};border-bottom:1px solid ${BORDER};vertical-align:top;font-variant-numeric:tabular-nums;">${value}</td>`;
-          })
-          .join("")}</tr>`,
-    )
+    .map((row, rowIndex) => {
+      const totalRow = emphasizeLastRow && rowIndex === lastIndex;
+      return `<tr>${row
+        .map((value, index) => {
+          const align = numeric.has(index) ? "right" : "left";
+          const width = columnWidths?.[index];
+          const widthAttr = width ? ` width="${escapeHtml(width)}"` : "";
+          const widthStyle = width ? `width:${width};` : "";
+          const totalStyle = totalRow ? `background:${HEADER_BG};font-weight:700;` : "";
+          return `<td${widthAttr} style="padding:8px 12px;text-align:${align};border-bottom:1px solid ${BORDER};vertical-align:top;${widthStyle}${totalStyle}">${value}</td>`;
+        })
+        .join("")}</tr>`;
+    })
     .join("");
   return `${groupHeadingHtml(title, count)}${spacerRow(12)}<tr><td>
-    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${BORDER};border-radius:12px;background:${WHITE};border-collapse:collapse;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border:1px solid ${BORDER};border-radius:12px;background:${WHITE};border-collapse:collapse;table-layout:fixed;">
+      ${colgroup}
       <thead><tr style="background:${HEADER_BG};">${head}</tr></thead>
       <tbody>${body}</tbody>
     </table>

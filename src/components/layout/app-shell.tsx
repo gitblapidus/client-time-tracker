@@ -11,6 +11,8 @@ const TITLES: Array<{ href: string; label: string }> = [
   { href: "/dashboard", label: "Dashboard" },
   { href: "/time-entry", label: "Time Entry" },
   { href: "/clients", label: "Clients & Projects" },
+  { href: "/integration/clients", label: "Clients" },
+  { href: "/integration/inventory", label: "Inventory of Integrations" },
   { href: "/admin", label: "Administration" },
   { href: "/reports", label: "Reports" },
   { href: "/settings", label: "Settings" },
@@ -65,6 +67,23 @@ function AppShellFrame({
       return [
         { href: "/clients", label: "Clients & Projects" },
         { label: "Client" },
+      ];
+    }
+    if (match.href === "/integration/clients" && pathname !== "/integration/clients") {
+      return [
+        { href: "/integration/clients", label: "Clients" },
+        { label: "Client" },
+      ];
+    }
+    if (match.href === "/integration/inventory" && pathname !== "/integration/inventory") {
+      const page = pathname.endsWith("/mapping")
+        ? "Mapping"
+        : pathname.endsWith("/sample")
+          ? "Sample"
+          : "Integration Details";
+      return [
+        { href: "/integration/inventory", label: "Inventory of Integrations" },
+        { label: page },
       ];
     }
     return [{ label: match.label }];

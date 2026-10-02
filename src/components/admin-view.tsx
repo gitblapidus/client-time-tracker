@@ -232,6 +232,7 @@ export function AdminView() {
                   { value: "MANAGED_SERVICE", label: PROJECT_TYPE_LABELS.MANAGED_SERVICE },
                   { value: "TIME_AND_MATERIALS", label: PROJECT_TYPE_LABELS.TIME_AND_MATERIALS },
                   { value: "CAPITAL_TIME_AND_MATERIALS", label: PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS },
+                  { value: "SOW", label: PROJECT_TYPE_LABELS.SOW },
                 ]}
               />
               <FilterMultiSelect
@@ -467,6 +468,49 @@ export function AdminView() {
                       {PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS} ({groupedProjects.capitalTimeAndMaterials.length})
                     </TableSectionRow>
                     {groupedProjects.capitalTimeAndMaterials.map((project) => (
+                      <TableRow key={project.id}>
+                        <TableCell>{project.client.name}</TableCell>
+                        <TableCell>
+                          <button
+                            type="button"
+                            className="font-medium text-blue-700 hover:underline"
+                            onClick={() => {
+                              setEditingProject(project);
+                              setProjectOpen(true);
+                            }}
+                          >
+                            {project.name}
+                          </button>
+                        </TableCell>
+                        <TableCell>{project.productionManager ?? "—"}</TableCell>
+                        <TableCell>
+                          {project.startYear && project.startMonth
+                            ? formatYearMonth(project.startYear, project.startMonth)
+                            : "—"}
+                        </TableCell>
+                        <TableCell className="text-right">{formatHours(project.monthlyHours)}</TableCell>
+                        <TableCell className="text-right">{formatHours(project.maximumCarryoverHours)}</TableCell>
+                        <TableCell>
+                          <ActiveStatusSelect
+                            label={`Status for ${project.name}`}
+                            value={project.active}
+                            disabled={updatingStatusId === project.id}
+                            onChange={(active) => updateProjectStatus(project, active)}
+                          />
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button onClick={() => { setEditingProject(project); setProjectOpen(true); }}>Edit</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </>
+                ) : null}
+                {groupedProjects.sow.length > 0 ? (
+                  <>
+                    <TableSectionRow colSpan={8}>
+                      {PROJECT_TYPE_LABELS.SOW} ({groupedProjects.sow.length})
+                    </TableSectionRow>
+                    {groupedProjects.sow.map((project) => (
                       <TableRow key={project.id}>
                         <TableCell>{project.client.name}</TableCell>
                         <TableCell>

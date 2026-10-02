@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
 
-/** Grouping / invoice card header tint: 15% darker than the original 10% primary wash. */
+/** Shared grouping header tint. Use this (or ProjectTypeHeading / TableSectionRow) for all grouping bars. */
 export const groupHeaderBgClass = "bg-[color-mix(in_srgb,var(--primary)_25%,white)]";
 
 export function ProjectTypeHeading({

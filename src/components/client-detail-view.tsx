@@ -423,6 +423,41 @@ export function ClientDetailView({ clientId, canEdit }: { clientId: string; canE
                   ))}
                 </>
               ) : null}
+              {groupedProjects.sow.length > 0 ? (
+                <>
+                  <TableSectionRow colSpan={projectColSpan}>
+                    {PROJECT_TYPE_LABELS.SOW} ({groupedProjects.sow.length})
+                  </TableSectionRow>
+                  {groupedProjects.sow.map((project) => (
+                    <TableRow key={project.id}>
+                      <TableCell className="font-medium">{project.name}</TableCell>
+                      <TableCell>{project.productionManager ?? "—"}</TableCell>
+                      <TableCell>
+                        {project.startYear && project.startMonth
+                          ? formatYearMonth(project.startYear, project.startMonth)
+                          : "—"}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatHours(project.monthlyHours)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{formatHours(project.maximumCarryoverHours)}</TableCell>
+                      <TableCell>
+                        <ActiveStatusSelect
+                          label={`Status for ${project.name}`}
+                          value={project.active}
+                          disabled={!canEdit || updatingStatusId === project.id}
+                          onChange={(active) => updateProjectStatus(project, active)}
+                        />
+                      </TableCell>
+                      {canEdit ? (
+                        <TableCell className="text-right">
+                          <Button variant="ghost" size="sm" onClick={() => { setEditingProject(project); setProjectOpen(true); }}>
+                            Edit
+                          </Button>
+                        </TableCell>
+                      ) : null}
+                    </TableRow>
+                  ))}
+                </>
+              ) : null}
             </TableBody>
           </Table>
         )}

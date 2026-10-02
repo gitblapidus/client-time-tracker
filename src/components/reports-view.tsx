@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Clock3, Code2, Copy, Download, Gauge, Percent, User, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { formatBurnRateReportHtml, formatBurnRateReportText, sortBurnProjects, type BurnProject, type BurnStatus, type BurnTotals } from "@/lib/burn-rate";
+import { formatBurnRateReportHtml, formatBurnRateReportText, formatGroupingSpend, formatMoney, sortBurnProjects, sumGroupingSpend, type BurnProject, type BurnStatus, type BurnTotals } from "@/lib/burn-rate";
 import {
   currentYearMonth,
   detectMonthRangePreset,
@@ -15,7 +15,7 @@ import {
   type MonthRangePreset,
 } from "@/lib/months";
 import { appendQueryValues } from "@/lib/query-params";
-import { isCapitalTimeAndMaterials, isManagedService, isTimeTrackedProject, PROJECT_TYPE_LABELS } from "@/lib/calculations";
+import { isCapitalTimeAndMaterials, isManagedService, isSow, isTimeTrackedProject, PROJECT_TYPE_LABELS, roundHours } from "@/lib/calculations";
 import { formatInvoiceReportHtml, formatInvoiceReportText } from "@/lib/invoice-copy";
 import {
   formatOverviewReportHtml,
@@ -23,9 +23,11 @@ import {
   formatWeeklyStatusReportHtml,
   formatWeeklyStatusReportText,
 } from "@/lib/overview-copy";
+import { formatSowReportHtml, formatSowReportText, type SowReportRow } from "@/lib/sow-report";
 import { partitionByProjectType } from "@/lib/time-hours";
 import { cn, formatHours, formatHoursUnit, nextMonthHint } from "@/lib/utils";
 import { BurnRateReport } from "@/components/burn-rate-report";
+import { SowReport } from "@/components/sow-report";
 import type { ClientRecord } from "@/components/clients-view";
 import type { ProjectRecord } from "@/components/project-form-dialog";
 import { Button } from "@/components/ui/button";
@@ -41,7 +43,7 @@ import { HoursRemaining } from "@/components/ui/hours-remaining";
 import { groupHeaderBgClass, ProjectTypeHeading } from "@/components/ui/project-type-heading";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-type ReportType = "overview" | "invoice" | "weekly-status" | "burn-rate";
+type ReportType = "overview" | "invoice" | "weekly-status" | "burn-rate" | "sow";
 
 type ReportRow = {
   year: number;
@@ -57,6 +59,8 @@ type ReportRow = {
   pmHours: number | null;
   hoursRemaining: number | null;
   hoursForNextMonth: number | null;
+  currency?: string | null;
+  totalSpend?: number | null;
 };
 
 type ReportResponse = {
@@ -71,6 +75,9 @@ type ReportResponse = {
   burnRate?: {
     projects: BurnProject[];
     totals: BurnTotals;
+  };
+  sow?: {
+    rows: SowReportRow[];
   };
 };
 
@@ -100,6 +107,7 @@ export function ReportsView() {
   const [burnStatusSavingId, setBurnStatusSavingId] = useState<string | null>(null);
   const isWeeklyStatus = reportType === "weekly-status";
   const isBurnRate = reportType === "burn-rate";
+  const isSowReport = reportType === "sow";
 
   useEffect(() => {
     Promise.all([
@@ -119,6 +127,7 @@ export function ReportsView() {
   const projectsForFilters = projects.filter((project) => {
     if (clientIds.length && !clientIds.includes(project.clientId)) return false;
     if (isBurnRate) return isCapitalTimeAndMaterials(project.type);
+    if (isSowReport) return isSow(project.type);
     return true;
   });
   const managerOptions = useMemo(() => {
@@ -132,7 +141,7 @@ export function ReportsView() {
       ...(hasUnassigned ? [{ value: "unassigned", label: "Unassigned" }] : []),
       ...names.map((name) => ({ value: name, label: name })),
     ];
-  }, [projects, clientIds, isBurnRate]);
+  }, [projects, clientIds, isBurnRate, isSowReport]);
   const filteredProjects = projectsForFilters.filter((project) => {
     if (!managerFilter.length) return true;
     return managerFilter.includes(project.productionManager ?? "unassigned");
@@ -182,8 +191,8 @@ export function ReportsView() {
   async function run(overrides?: Parameters<typeof reportParams>[0]) {
     const type = overrides?.reportType ?? reportType;
     const selectedClients = overrides?.clientIds ?? clientIds;
-    if (type === "weekly-status" && !selectedClients[0]) {
-      toast.error("Select a client.");
+    if (type === "weekly-status" && selectedClients.length === 0) {
+      toast.error("Select at least one client.");
       return;
     }
     setLoading(true);
@@ -208,17 +217,14 @@ export function ReportsView() {
     if (next === "weekly-status") {
       const month = end;
       setStart(month);
-      const selected = clientIds.length === 1 ? clientIds[0] : "";
-      const nextClients = selected ? [selected] : [];
-      setClientIds(nextClients);
       setProjectIds([]);
       setManagerFilter([]);
-      if (!nextClients[0]) return;
+      if (clientIds.length === 0) return;
       void run({
         reportType: next,
         start: month,
         end: month,
-        clientIds: nextClients,
+        clientIds,
         projectIds: [],
         managerFilter: [],
       });
@@ -228,11 +234,15 @@ export function ReportsView() {
       const project = projects.find((item) => item.id === id);
       return project != null && isCapitalTimeAndMaterials(project.type);
     });
-    const nextProjectIds = next === "burn-rate" ? capitalProjectIds : projectIds;
-    if (next === "burn-rate") {
+    const sowProjectIds = projectIds.filter((id) => {
+      const project = projects.find((item) => item.id === id);
+      return project != null && isSow(project.type);
+    });
+    const nextProjectIds = next === "burn-rate" ? capitalProjectIds : next === "sow" ? sowProjectIds : projectIds;
+    if (next === "burn-rate" || next === "sow") {
       setProjectIds(nextProjectIds);
     }
-    if (next === "burn-rate" || reportType === "burn-rate") {
+    if (next === "burn-rate" || reportType === "burn-rate" || next === "sow" || reportType === "sow") {
       void run({ reportType: next, projectIds: nextProjectIds });
     }
   }
@@ -302,33 +312,42 @@ export function ReportsView() {
     [report],
   );
   const managedSummary = useMemo(() => {
-    const available = groupedRows.managed.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0);
-    const used = groupedRows.managed.reduce((sum, row) => sum + row.hoursUsed, 0);
-    const remaining = groupedRows.managed.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0);
+    const available = roundHours(groupedRows.managed.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0));
+    const used = roundHours(groupedRows.managed.reduce((sum, row) => sum + row.hoursUsed, 0));
+    const remaining = roundHours(groupedRows.managed.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0));
+    const nextMonth = roundHours(groupedRows.managed.reduce((sum, row) => sum + (row.hoursForNextMonth ?? 0), 0));
     return {
       available,
       used,
       remaining,
+      nextMonth,
       utilization: available > 0 ? (used / available) * 100 : 0,
     };
   }, [groupedRows]);
   const tmSummary = useMemo(() => ({
-    development: groupedRows.timeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0),
-    pm: groupedRows.timeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0),
-    total: groupedRows.timeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0),
+    development: roundHours(groupedRows.timeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0)),
+    pm: roundHours(groupedRows.timeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0)),
+    total: roundHours(groupedRows.timeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0)),
+    ...sumGroupingSpend(groupedRows.timeAndMaterials),
   }), [groupedRows]);
   const capitalSummary = useMemo(() => ({
-    development: groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0),
-    pm: groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0),
-    total: groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0),
+    development: roundHours(groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0)),
+    pm: roundHours(groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + (row.pmHours ?? 0), 0)),
+    total: roundHours(groupedRows.capitalTimeAndMaterials.reduce((sum, row) => sum + row.hoursUsed, 0)),
+    ...sumGroupingSpend(groupedRows.capitalTimeAndMaterials),
   }), [groupedRows]);
   const weeklyMonth = parse(start);
-  const weeklyClientName = clients.find((client) => client.id === clientIds[0])?.name
-    ?? report?.rows[0]?.clientName
-    ?? null;
-  const weeklyHeading = weeklyClientName
-    ? `${weeklyClientName} — ${formatYearMonth(weeklyMonth.year, weeklyMonth.month)}`
+  const weeklyClientNames = clients
+    .filter((client) => clientIds.includes(client.id))
+    .map((client) => client.name);
+  const weeklyHeading = weeklyClientNames.length
+    ? `${weeklyClientNames.join(", ")} — ${formatYearMonth(weeklyMonth.year, weeklyMonth.month)}`
     : null;
+  const weeklyShowClient = new Set([
+    ...groupedRows.managed.map((row) => row.clientName),
+    ...groupedRows.timeAndMaterials.map((row) => row.clientName),
+    ...groupedRows.capitalTimeAndMaterials.map((row) => row.clientName),
+  ]).size > 1;
 
   return (
     <div>
@@ -339,8 +358,19 @@ export function ReportsView() {
           <>
             <Button
               variant="outline"
-              disabled={loading || (isBurnRate ? !report?.burnRate?.projects.length : !report?.rows.length)}
+              disabled={
+                loading
+                || (isBurnRate
+                  ? !report?.burnRate?.projects.length
+                  : isSowReport
+                    ? !report?.sow?.rows.length
+                    : !report?.rows.length)
+              }
               onClick={() => {
+                if (reportType === "sow") {
+                  void copySowReport(report?.sow?.rows ?? []);
+                  return;
+                }
                 if (reportType === "burn-rate") {
                   void copyBurnRateReport(report?.burnRate?.projects ?? [], report?.burnRate?.totals ?? EMPTY_BURN_TOTALS);
                   return;
@@ -360,6 +390,7 @@ export function ReportsView() {
                     groupedRows.managed,
                     groupedRows.timeAndMaterials,
                     groupedRows.capitalTimeAndMaterials,
+                    weeklyShowClient,
                   );
                   return;
                 }
@@ -399,26 +430,22 @@ export function ReportsView() {
               <option value="invoice">Invoice</option>
               <option value="weekly-status">Weekly Status</option>
               <option value="burn-rate">Burn Rate</option>
+              <option value="sow">SOW</option>
             </FilterSelect>
           </div>
           {isWeeklyStatus ? (
             <>
               <div className="space-y-1.5">
-                <Label htmlFor="weekly-client">Client</Label>
-                <FilterSelect
-                  id="weekly-client"
+                <Label>Client</Label>
+                <FilterMultiSelect
                   className="w-full"
-                  aria-label="Client"
-                  value={clientIds[0] ?? ""}
-                  onChange={(event) => setClientIds(event.target.value ? [event.target.value] : [])}
-                >
-                  <option value="">Select a client</option>
-                  {clients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.name}
-                    </option>
-                  ))}
-                </FilterSelect>
+                  ariaLabel="Filter by client"
+                  placeholder="Select clients"
+                  countNoun="clients"
+                  value={clientIds}
+                  onChange={setClientIds}
+                  options={clients.map((client) => ({ value: client.id, label: client.name }))}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="weekly-month">Month</Label>
@@ -528,7 +555,7 @@ export function ReportsView() {
           {weeklyHeading}
         </h2>
       ) : null}
-      {report && reportType !== "overview" && reportType !== "burn-rate" ? (
+      {report && reportType !== "overview" && reportType !== "burn-rate" && reportType !== "sow" ? (
         <div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <SummaryCard title="Total Available" value={formatHoursUnit(report.summary.totalAvailableHours)} icon={Wallet} />
           <SummaryCard title="Total Used" value={formatHoursUnit(report.summary.totalUsedHours)} icon={Clock3} />
@@ -539,6 +566,18 @@ export function ReportsView() {
             tone={report.summary.totalRemainingHours < 0 ? "danger" : "success"}
           />
           <SummaryCard title="Utilization" value={`${formatHours(report.summary.utilizationPercent)}%`} icon={Percent} tone={report.summary.utilizationPercent > 100 ? "danger" : "default"} />
+        </div>
+      ) : null}
+      {report && reportType === "sow" ? (
+        <div className="mb-5 grid gap-3 sm:grid-cols-3">
+          <SummaryCard title="Quoted Hours" value={formatHoursUnit(report.summary.totalAvailableHours)} icon={Wallet} />
+          <SummaryCard title="Hours Used" value={formatHoursUnit(report.summary.totalUsedHours)} icon={Clock3} />
+          <SummaryCard
+            title="Remaining"
+            value={formatHoursUnit(report.summary.totalRemainingHours)}
+            icon={Gauge}
+            tone={report.summary.totalRemainingHours < 0 ? "danger" : "success"}
+          />
         </div>
       ) : null}
       {reportType === "overview" ? (
@@ -574,6 +613,8 @@ export function ReportsView() {
           statusSavingId={burnStatusSavingId}
           onStatusChange={(projectId, status) => void saveBurnStatus(projectId, status)}
         />
+      ) : isSowReport ? (
+        <SowReport rows={report?.sow?.rows ?? []} />
       ) : !report?.rows.length ? (
         <Card className="overflow-hidden">
           <EmptyState title="No report rows" description="Adjust filters or add time entries first." />
@@ -607,10 +648,13 @@ export function ReportsView() {
                   />
                 </div>
               ) : null}
-              <Table>
+              <Table className={isWeeklyStatus ? "table-fixed" : undefined}>
+                {isWeeklyStatus ? <WeeklySplitColgroup showClient={weeklyShowClient} /> : null}
                 <TableHeader>
                   <TableRow>
-                    {isWeeklyStatus ? null : (
+                    {isWeeklyStatus ? (
+                      weeklyShowClient ? <TableHead>Client</TableHead> : null
+                    ) : (
                       <>
                         <TableHead>Month</TableHead>
                         <TableHead>Client</TableHead>
@@ -618,29 +662,31 @@ export function ReportsView() {
                     )}
                     <TableHead>Project</TableHead>
                     {isWeeklyStatus ? null : <TableHead>Project Manager</TableHead>}
-                    <TableHead className="text-right">Available</TableHead>
-                    <TableHead className="text-right">Used</TableHead>
-                    <TableHead className="text-right">Remaining</TableHead>
-                    <TableHead className="text-right">Next Month</TableHead>
+                    <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.development))}>Available</TableHead>
+                    <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.pm))}>Used</TableHead>
+                    <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.total))}>Remaining</TableHead>
+                    <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.spend))}>Next Month</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {groupedRows.managed.map((row, index) => (
                     <TableRow key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`}>
-                      {isWeeklyStatus ? null : (
+                      {isWeeklyStatus ? (
+                        weeklyShowClient ? <TableCell className="min-w-0">{row.clientName}</TableCell> : null
+                      ) : (
                         <>
                           <TableCell>{formatYearMonth(row.year, row.month)}</TableCell>
                           <TableCell>{row.clientName}</TableCell>
                         </>
                       )}
-                      <TableCell>{row.projectName}</TableCell>
+                      <TableCell className={isWeeklyStatus ? "min-w-0" : undefined}>{row.projectName}</TableCell>
                       {isWeeklyStatus ? null : <TableCell>{row.productionManager ?? "—"}</TableCell>}
-                      <TableCell className="text-right tabular-nums">{formatHours(row.hoursAvailable)}</TableCell>
-                      <TableCell className="text-right tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className={cn("text-right tabular-nums", isWeeklyStatus && WEEKLY_SPLIT_COLS.development)}>{formatHours(row.hoursAvailable)}</TableCell>
+                      <TableCell className={cn("text-right tabular-nums", isWeeklyStatus && WEEKLY_SPLIT_COLS.pm)}>{formatHours(row.hoursUsed)}</TableCell>
+                      <TableCell className={cn("text-right", isWeeklyStatus && WEEKLY_SPLIT_COLS.total)}>
                         <HoursRemaining value={row.hoursRemaining} />
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className={cn("text-right", isWeeklyStatus && WEEKLY_SPLIT_COLS.spend)}>
                         <div className="font-medium tabular-nums">{formatHours(row.hoursForNextMonth)}</div>
                         {nextMonthHint(row) ? (
                           <div className="text-[calc(11px+1pt)] text-[var(--primary)]">{nextMonthHint(row)}</div>
@@ -648,6 +694,19 @@ export function ReportsView() {
                       </TableCell>
                     </TableRow>
                   ))}
+                  {isWeeklyStatus ? (
+                    <TableRow className={cn(groupHeaderBgClass, "font-semibold hover:bg-[color-mix(in_srgb,var(--primary)_25%,white)]")}>
+                      <TableCell colSpan={weeklyShowClient ? 2 : 1}>Total</TableCell>
+                      <TableCell className={cn("text-right tabular-nums", WEEKLY_SPLIT_COLS.development)}>{formatHours(managedSummary.available)}</TableCell>
+                      <TableCell className={cn("text-right tabular-nums", WEEKLY_SPLIT_COLS.pm)}>{formatHours(managedSummary.used)}</TableCell>
+                      <TableCell className={cn("text-right", WEEKLY_SPLIT_COLS.total)}>
+                        <HoursRemaining value={managedSummary.remaining} />
+                      </TableCell>
+                      <TableCell className={cn("text-right font-medium tabular-nums", WEEKLY_SPLIT_COLS.spend)}>
+                        {formatHours(managedSummary.nextMonth)}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                 </TableBody>
               </Table>
             </Card>
@@ -659,6 +718,8 @@ export function ReportsView() {
               summary={tmSummary}
               reportType={reportType}
               isWeeklyStatus={isWeeklyStatus}
+              showClient={weeklyShowClient}
+              showTotalSpend={isWeeklyStatus}
             />
           ) : null}
           {groupedRows.capitalTimeAndMaterials.length > 0 ? (
@@ -668,11 +729,33 @@ export function ReportsView() {
               summary={capitalSummary}
               reportType={reportType}
               isWeeklyStatus={isWeeklyStatus}
+              showClient={weeklyShowClient}
+              showTotalSpend={isWeeklyStatus}
             />
           ) : null}
         </div>
       )}
     </div>
+  );
+}
+
+const WEEKLY_SPLIT_COLS = {
+  development: "w-[10.5rem]",
+  pm: "w-[8rem]",
+  total: "w-[6.5rem]",
+  spend: "w-[12rem]",
+} as const;
+
+function WeeklySplitColgroup({ showClient = false }: { showClient?: boolean }) {
+  return (
+    <colgroup>
+      {showClient ? <col className="w-[9rem]" style={{ width: "9rem" }} /> : null}
+      <col />
+      <col className={WEEKLY_SPLIT_COLS.development} style={{ width: "10.5rem" }} />
+      <col className={WEEKLY_SPLIT_COLS.pm} style={{ width: "8rem" }} />
+      <col className={WEEKLY_SPLIT_COLS.total} style={{ width: "6.5rem" }} />
+      <col className={WEEKLY_SPLIT_COLS.spend} style={{ width: "12rem" }} />
+    </colgroup>
   );
 }
 
@@ -682,12 +765,16 @@ function ReportSplitHoursCard({
   summary,
   reportType,
   isWeeklyStatus,
+  showClient = false,
+  showTotalSpend = false,
 }: {
   title: string;
   rows: ReportRow[];
-  summary: { development: number; pm: number; total: number };
+  summary: { development: number; pm: number; total: number; spend?: number | null; currency?: string | null };
   reportType: ReportType;
   isWeeklyStatus: boolean;
+  showClient?: boolean;
+  showTotalSpend?: boolean;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -699,10 +786,13 @@ function ReportSplitHoursCard({
           <SummaryCard title="Total Hours Used" value={formatHoursUnit(summary.total)} icon={Clock3} />
         </div>
       ) : null}
-      <Table>
+      <Table className={isWeeklyStatus ? "table-fixed" : undefined}>
+        {isWeeklyStatus ? <WeeklySplitColgroup showClient={showClient} /> : null}
         <TableHeader>
           <TableRow>
-            {isWeeklyStatus ? null : (
+            {isWeeklyStatus ? (
+              showClient ? <TableHead>Client</TableHead> : null
+            ) : (
               <>
                 <TableHead>Month</TableHead>
                 <TableHead>Client</TableHead>
@@ -710,27 +800,62 @@ function ReportSplitHoursCard({
             )}
             <TableHead>Project</TableHead>
             {isWeeklyStatus ? null : <TableHead>Project Manager</TableHead>}
-            <TableHead className="text-right">Development Hours</TableHead>
-            <TableHead className="text-right">PM Hours</TableHead>
-            <TableHead className="text-right">Total</TableHead>
+            <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.development))}>Development Hours</TableHead>
+            <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.pm))}>PM Hours</TableHead>
+            <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.total))}>Total</TableHead>
+            {showTotalSpend ? (
+              <TableHead className={cn("text-right", isWeeklyStatus && cn("whitespace-nowrap", WEEKLY_SPLIT_COLS.spend))}>Total Spend</TableHead>
+            ) : null}
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.map((row, index) => (
             <TableRow key={`${row.clientName}-${row.projectName}-${row.year}-${row.month}-${index}`}>
-              {isWeeklyStatus ? null : (
+              {isWeeklyStatus ? (
+                showClient ? <TableCell className="min-w-0">{row.clientName}</TableCell> : null
+              ) : (
                 <>
                   <TableCell>{formatYearMonth(row.year, row.month)}</TableCell>
                   <TableCell>{row.clientName}</TableCell>
                 </>
               )}
-              <TableCell>{row.projectName}</TableCell>
+              <TableCell className={isWeeklyStatus ? "min-w-0" : undefined}>{row.projectName}</TableCell>
               {isWeeklyStatus ? null : <TableCell>{row.productionManager ?? "—"}</TableCell>}
-              <TableCell className="text-right tabular-nums">{formatHours(row.developmentHours)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatHours(row.pmHours)}</TableCell>
-              <TableCell className="text-right font-medium tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
+              <TableCell className={cn("text-right tabular-nums", isWeeklyStatus && WEEKLY_SPLIT_COLS.development)}>
+                {formatHours(row.developmentHours)}
+              </TableCell>
+              <TableCell className={cn("text-right tabular-nums", isWeeklyStatus && WEEKLY_SPLIT_COLS.pm)}>
+                {formatHours(row.pmHours)}
+              </TableCell>
+              <TableCell className={cn("text-right font-medium tabular-nums", isWeeklyStatus && WEEKLY_SPLIT_COLS.total)}>
+                {formatHours(row.hoursUsed)}
+              </TableCell>
+              {showTotalSpend ? (
+                <TableCell className={cn("text-right font-medium tabular-nums", isWeeklyStatus && WEEKLY_SPLIT_COLS.spend)}>
+                  {formatMoney(row.totalSpend, row.currency)}
+                </TableCell>
+              ) : null}
             </TableRow>
           ))}
+          {isWeeklyStatus ? (
+            <TableRow className={cn(groupHeaderBgClass, "font-semibold hover:bg-[color-mix(in_srgb,var(--primary)_25%,white)]")}>
+              <TableCell colSpan={showClient ? 2 : 1}>Total</TableCell>
+              <TableCell className={cn("text-right tabular-nums", WEEKLY_SPLIT_COLS.development)}>
+                {formatHours(summary.development)}
+              </TableCell>
+              <TableCell className={cn("text-right tabular-nums", WEEKLY_SPLIT_COLS.pm)}>
+                {formatHours(summary.pm)}
+              </TableCell>
+              <TableCell className={cn("text-right font-medium tabular-nums", WEEKLY_SPLIT_COLS.total)}>
+                {formatHours(summary.total)}
+              </TableCell>
+              {showTotalSpend ? (
+                <TableCell className={cn("text-right font-medium tabular-nums whitespace-nowrap", WEEKLY_SPLIT_COLS.spend)}>
+                  {formatGroupingSpend(rows)}
+                </TableCell>
+              ) : null}
+            </TableRow>
+          ) : null}
         </TableBody>
       </Table>
     </Card>
@@ -851,6 +976,21 @@ function InvoiceMetric({ label, children }: { label: string; children: ReactNode
   );
 }
 
+async function copySowReport(rows: SowReportRow[]) {
+  const text = formatSowReportText(rows);
+  if (!text) {
+    toast.error("Nothing to copy.");
+    return;
+  }
+  const html = formatSowReportHtml(rows);
+  try {
+    await copyTextAndHtml(text, html);
+    toast.success("Report copied.");
+  } catch {
+    toast.error("Unable to copy report.");
+  }
+}
+
 async function copyBurnRateReport(projects: BurnProject[], totals: BurnTotals) {
   const text = formatBurnRateReportText(projects, totals);
   if (!text) {
@@ -872,13 +1012,14 @@ async function copyWeeklyStatusReport(
   managed: ReportRow[],
   timeAndMaterials: ReportRow[],
   capitalTimeAndMaterials: ReportRow[],
+  includeClient = false,
 ) {
-  const text = formatWeeklyStatusReportText(heading, summary, managed, timeAndMaterials, capitalTimeAndMaterials);
+  const text = formatWeeklyStatusReportText(heading, summary, managed, timeAndMaterials, capitalTimeAndMaterials, includeClient);
   if (!text) {
     toast.error("Nothing to copy.");
     return;
   }
-  const html = formatWeeklyStatusReportHtml(heading, summary, managed, timeAndMaterials, capitalTimeAndMaterials);
+  const html = formatWeeklyStatusReportHtml(heading, summary, managed, timeAndMaterials, capitalTimeAndMaterials, includeClient);
   try {
     await copyTextAndHtml(text, html);
     toast.success("Report copied.");
@@ -967,7 +1108,7 @@ function copyHtmlViaSelection(html: string): boolean {
   const host = document.createElement("div");
   host.setAttribute("contenteditable", "true");
   host.innerHTML = html;
-  host.style.cssText = "position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+  host.style.cssText = "position:fixed;left:-10000px;top:0;width:800px;height:auto;opacity:0;pointer-events:none;";
   document.body.appendChild(host);
   host.focus();
   const selection = window.getSelection();

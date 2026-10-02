@@ -5,9 +5,10 @@ import { useRouter } from "next/navigation";
 import { Check, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import { calculateMonthSnapshot, isManagedService, PROJECT_TYPE_LABELS, type ProjectType, type UtilizationStatus } from "@/lib/calculations";
+import { calculateMonthSnapshot, isManagedService, isSow, PROJECT_TYPE_LABELS, type ProjectType, type UtilizationStatus } from "@/lib/calculations";
 import { currentYearMonth, formatYearMonth } from "@/lib/months";
-import { partitionByProjectType, totalTmHours } from "@/lib/time-hours";
+import { sowRemaining } from "@/lib/sow-report";
+import { partitionByProjectType, resolveSowHours, totalSowHours, totalTmHours } from "@/lib/time-hours";
 import { formatHours, formatHoursUnit, nextMonthHint } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,11 +35,15 @@ type TimeRow = {
   projectType: ProjectType | string;
   monthlyHours: number | null;
   maximumCarryoverHours: number | null;
+  quotedHours: number | null;
+  sowUsedOtherMonths: number | null;
   year: number;
   month: number;
   hoursUsed: number;
   developmentHours: number | null;
   pmHours: number | null;
+  deliveryLeadHours: number | null;
+  technicalLeadershipHours: number | null;
   carryoverUsed: number | null;
   hoursAvailable: number | null;
   hoursRemaining: number | null;
@@ -50,20 +55,50 @@ type DraftHours = {
   hoursUsed: number;
   developmentHours: number;
   pmHours: number;
+  deliveryLeadHours: number;
+  technicalLeadershipHours: number;
 };
 
+function emptyDraft(): DraftHours {
+  return { hoursUsed: 0, developmentHours: 0, pmHours: 0, deliveryLeadHours: 0, technicalLeadershipHours: 0 };
+}
+
 function draftFromRow(row: TimeRow): DraftHours {
+  if (isSow(row.projectType)) {
+    const split = resolveSowHours(row);
+    return {
+      hoursUsed: split.hoursUsed,
+      developmentHours: split.developmentHours,
+      pmHours: 0,
+      deliveryLeadHours: split.deliveryLeadHours,
+      technicalLeadershipHours: split.technicalLeadershipHours,
+    };
+  }
   if (isManagedService(row.projectType)) {
-    return { hoursUsed: row.hoursUsed, developmentHours: 0, pmHours: 0 };
+    return { ...emptyDraft(), hoursUsed: row.hoursUsed };
   }
   return {
     hoursUsed: row.hoursUsed,
     developmentHours: row.developmentHours ?? row.hoursUsed,
     pmHours: row.pmHours ?? 0,
+    deliveryLeadHours: 0,
+    technicalLeadershipHours: 0,
   };
 }
 
 function liveRow(row: TimeRow, draft: DraftHours): TimeRow {
+  if (isSow(row.projectType)) {
+    const hoursUsed = totalSowHours(draft.developmentHours, draft.deliveryLeadHours, draft.technicalLeadershipHours);
+    return {
+      ...row,
+      hoursUsed,
+      developmentHours: draft.developmentHours,
+      pmHours: null,
+      deliveryLeadHours: draft.deliveryLeadHours,
+      technicalLeadershipHours: draft.technicalLeadershipHours,
+      hoursRemaining: sowRemaining(row.quotedHours ?? 0, (row.sowUsedOtherMonths ?? 0) + hoursUsed),
+    };
+  }
   const hoursUsed = isManagedService(row.projectType)
     ? draft.hoursUsed
     : totalTmHours(draft.developmentHours, draft.pmHours);
@@ -91,6 +126,14 @@ function liveRow(row: TimeRow, draft: DraftHours): TimeRow {
 
 function draftsEqual(row: TimeRow, draft: DraftHours | undefined) {
   const current = draft ?? draftFromRow(row);
+  if (isSow(row.projectType)) {
+    const split = resolveSowHours(row);
+    return (
+      current.developmentHours === split.developmentHours &&
+      current.deliveryLeadHours === split.deliveryLeadHours &&
+      current.technicalLeadershipHours === split.technicalLeadershipHours
+    );
+  }
   if (isManagedService(row.projectType)) {
     return current.hoursUsed === row.hoursUsed;
   }
@@ -249,6 +292,182 @@ function SplitHoursSection({
   );
 }
 
+function SowHoursSection({
+  rows,
+  drafts,
+  onUpdate,
+}: {
+  rows: TimeRow[];
+  drafts: Record<string, DraftHours>;
+  onUpdate: (projectId: string, patch: Partial<DraftHours>) => void;
+}) {
+  if (rows.length === 0) return null;
+  const quoted = rows.reduce((sum, row) => sum + (row.quotedHours ?? 0), 0);
+  const development = rows.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0);
+  const deliveryLead = rows.reduce((sum, row) => sum + (row.deliveryLeadHours ?? 0), 0);
+  const technicalLeadership = rows.reduce((sum, row) => sum + (row.technicalLeadershipHours ?? 0), 0);
+  const used = rows.reduce((sum, row) => sum + row.hoursUsed, 0);
+  const remaining = rows.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0);
+  return (
+    <>
+      <ProjectTypeHeading title={PROJECT_TYPE_LABELS.SOW} count={rows.length} />
+      <div className="hidden lg:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Client</TableHead>
+              <TableHead>Project</TableHead>
+              <TableHead>Project Manager</TableHead>
+              <TableHead className="text-right">Quoted Hours</TableHead>
+              <TableHead className="whitespace-nowrap text-right pr-6">Development</TableHead>
+              <TableHead className="whitespace-nowrap text-right pr-6">Delivery Lead</TableHead>
+              <TableHead className="whitespace-nowrap text-right pr-6">Technical Leadership</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+              <TableHead className="text-right">Remaining</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => {
+              const draft = drafts[row.projectId] ?? draftFromRow(row);
+              return (
+                <TableRow key={row.projectId}>
+                  <TableCell className="font-medium">{row.clientName}</TableCell>
+                  <TableCell className="font-medium">{row.projectName}</TableCell>
+                  <TableCell>{row.productionManager ?? "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums">{formatHours(row.quotedHours)}</TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <NumericInput
+                        aria-label={`Development hours for ${row.projectName}`}
+                        value={draft.developmentHours}
+                        onValueChange={(value) => onUpdate(row.projectId, { developmentHours: value })}
+                      />
+                    </HoursAlign>
+                  </TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <NumericInput
+                        aria-label={`Delivery Lead hours for ${row.projectName}`}
+                        value={draft.deliveryLeadHours}
+                        onValueChange={(value) => onUpdate(row.projectId, { deliveryLeadHours: value })}
+                      />
+                    </HoursAlign>
+                  </TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <NumericInput
+                        aria-label={`Technical Leadership hours for ${row.projectName}`}
+                        value={draft.technicalLeadershipHours}
+                        onValueChange={(value) => onUpdate(row.projectId, { technicalLeadershipHours: value })}
+                      />
+                    </HoursAlign>
+                  </TableCell>
+                  <TableCell>
+                    <HoursAlign>
+                      <HoursReadout>
+                        {formatHours(totalSowHours(draft.developmentHours, draft.deliveryLeadHours, draft.technicalLeadershipHours))}
+                      </HoursReadout>
+                    </HoursAlign>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <HoursRemaining value={row.hoursRemaining} />
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            <TableRow className="hover:bg-transparent">
+              <TableCell colSpan={3} className="font-medium text-[var(--muted-foreground)]">Total</TableCell>
+              <TableCell className="text-right tabular-nums">{formatHours(quoted)}</TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(development)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(deliveryLead)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(technicalLeadership)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+              <TableCell>
+                <HoursAlign>
+                  <HoursReadout>{formatHours(used)}</HoursReadout>
+                </HoursAlign>
+              </TableCell>
+              <TableCell className="text-right">
+                <HoursRemaining value={remaining} />
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
+      <div className="divide-y divide-[var(--border)] lg:hidden">
+        {rows.map((row) => {
+          const draft = drafts[row.projectId] ?? draftFromRow(row);
+          return (
+            <div key={row.projectId} className="space-y-3 px-4 py-4">
+              <div className="min-w-0">
+                <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
+                <p className="text-sm text-[var(--foreground)]">{row.projectName}</p>
+                {row.productionManager ? (
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">{row.productionManager}</p>
+                ) : null}
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="col-span-2">
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Quoted Hours</p>
+                  <p className="tabular-nums">{formatHours(row.quotedHours)}</p>
+                </div>
+                <div>
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Development</p>
+                  <NumericInput
+                    aria-label={`Development hours for ${row.projectName}`}
+                    className="w-full"
+                    value={draft.developmentHours}
+                    onValueChange={(value) => onUpdate(row.projectId, { developmentHours: value })}
+                  />
+                </div>
+                <div>
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Delivery Lead</p>
+                  <NumericInput
+                    aria-label={`Delivery Lead hours for ${row.projectName}`}
+                    className="w-full"
+                    value={draft.deliveryLeadHours}
+                    onValueChange={(value) => onUpdate(row.projectId, { deliveryLeadHours: value })}
+                  />
+                </div>
+                <div>
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Technical Leadership</p>
+                  <NumericInput
+                    aria-label={`Technical Leadership hours for ${row.projectName}`}
+                    className="w-full"
+                    value={draft.technicalLeadershipHours}
+                    onValueChange={(value) => onUpdate(row.projectId, { technicalLeadershipHours: value })}
+                  />
+                </div>
+                <div>
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Total</p>
+                  <p className="font-medium tabular-nums">
+                    {formatHours(totalSowHours(draft.developmentHours, draft.deliveryLeadHours, draft.technicalLeadershipHours))}
+                  </p>
+                </div>
+                <div className="col-span-2">
+                  <p className="text-[calc(11px+1pt)] text-[var(--muted-foreground)]">Remaining</p>
+                  <HoursRemaining value={row.hoursRemaining} />
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export function TimeEntryView() {
   const router = useRouter();
   const initial = currentYearMonth();
@@ -316,9 +535,11 @@ export function TimeEntryView() {
   function updateDraft(projectId: string, patch: Partial<DraftHours>) {
     setDrafts((current) => {
       const row = rows.find((item) => item.projectId === projectId);
-      const previous = current[projectId] ?? (row ? draftFromRow(row) : { hoursUsed: 0, developmentHours: 0, pmHours: 0 });
+      const previous = current[projectId] ?? (row ? draftFromRow(row) : emptyDraft());
       const next = { ...previous, ...patch };
-      if (patch.developmentHours != null || patch.pmHours != null) {
+      if (row && isSow(row.projectType) && (patch.developmentHours != null || patch.deliveryLeadHours != null || patch.technicalLeadershipHours != null)) {
+        next.hoursUsed = totalSowHours(next.developmentHours, next.deliveryLeadHours, next.technicalLeadershipHours);
+      } else if (patch.developmentHours != null || patch.pmHours != null) {
         next.hoursUsed = totalTmHours(next.developmentHours, next.pmHours);
       }
       return { ...current, [projectId]: next };
@@ -335,6 +556,14 @@ export function TimeEntryView() {
           month,
           entries: rows.map((row) => {
             const draft = drafts[row.projectId] ?? draftFromRow(row);
+            if (isSow(row.projectType)) {
+              return {
+                projectId: row.projectId,
+                developmentHours: draft.developmentHours,
+                deliveryLeadHours: draft.deliveryLeadHours,
+                technicalLeadershipHours: draft.technicalLeadershipHours,
+              };
+            }
             if (isManagedService(row.projectType)) {
               return { projectId: row.projectId, hoursUsed: draft.hoursUsed };
             }
@@ -394,7 +623,7 @@ export function TimeEntryView() {
     })
     .map((row) => liveRow(row, drafts[row.projectId] ?? draftFromRow(row)));
 
-  const { managed, timeAndMaterials, capitalTimeAndMaterials } = partitionByProjectType(displayRows);
+  const { managed, timeAndMaterials, capitalTimeAndMaterials, sow } = partitionByProjectType(displayRows);
   const totalAvailable = managed.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0);
   const totalUsed = displayRows.reduce((sum, row) => sum + row.hoursUsed, 0);
   const totalRemaining = managed.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0);
@@ -574,6 +803,7 @@ export function TimeEntryView() {
               drafts={drafts}
               onUpdate={updateDraft}
             />
+            <SowHoursSection rows={sow} drafts={drafts} onUpdate={updateDraft} />
           </>
         )}
       </Card>

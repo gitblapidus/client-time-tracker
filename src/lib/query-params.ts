@@ -8,12 +8,16 @@ export function parseListParam(searchParams: URLSearchParams, key: string): stri
   )];
 }
 
-export function parseActiveParam(searchParams: URLSearchParams): boolean | undefined {
-  const values = [...new Set(parseListParam(searchParams, "active").filter((value) => value === "true" || value === "false"))];
+export function parseBooleanParam(searchParams: URLSearchParams, key: string): boolean | undefined {
+  const values = [...new Set(parseListParam(searchParams, key).filter((value) => value === "true" || value === "false"))];
   if (values.length === 1) {
     return values[0] === "true";
   }
   return undefined;
+}
+
+export function parseActiveParam(searchParams: URLSearchParams): boolean | undefined {
+  return parseBooleanParam(searchParams, "active");
 }
 
 export function appendQueryValues(params: URLSearchParams, key: string, values: string[]) {

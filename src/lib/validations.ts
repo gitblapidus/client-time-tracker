@@ -1,8 +1,17 @@
 import { z } from "zod";
 import { BURN_STATUSES } from "@/lib/burn-rate";
 import { PROJECT_CURRENCIES, PROJECT_TYPES } from "@/lib/calculations";
+import {
+  INTEGRATION_DIRECTIONS,
+  INTEGRATION_FORMATS,
+  INTEGRATION_INTERFACE_TYPES,
+  INTEGRATION_MODES,
+  INTEGRATION_TYPES,
+  normalizeReferenceId,
+} from "@/lib/integration-inventory";
 import { FINANCE_EMAIL_PATTERN, parseFinanceEmails } from "@/lib/finance-emails";
 import { normalizeProductionManagerName } from "@/lib/production-managers";
+import { normalizeRichText } from "@/lib/rich-text";
 
 const nonNegativeNumber = z.coerce.number().finite().min(0, "Value cannot be negative.");
 
@@ -52,6 +61,21 @@ export const optionalContactEmailSchema = z
     message: "Enter a valid email address.",
   });
 
+export const optionalContactPhoneSchema = z
+  .string()
+  .trim()
+  .max(40, "Phone number is too long.")
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => (value ? value : null))
+  .refine((value) => {
+    if (value == null) return true;
+    const digits = value.replace(/\D/g, "");
+    return digits.length >= 7 && digits.length <= 15;
+  }, {
+    message: "Enter a valid phone number.",
+  });
+
 export const clientSchema = z.object({
   name: z.string().trim().min(1, "Client name is required.").max(120, "Client name is too long."),
   active: z.boolean().default(true),
@@ -67,6 +91,113 @@ export const clientSchema = z.object({
 
 export const clientPatchSchema = z.object({
   active: z.boolean(),
+});
+
+export const integrationClientSchema = z.object({
+  name: z.string().trim().min(1, "Client name is required.").max(120, "Client name is too long."),
+  active: z.boolean().default(true),
+  executiveName: optionalContactNameSchema.optional(),
+  executiveEmail: optionalContactEmailSchema.optional(),
+  executivePhone: optionalContactPhoneSchema.optional(),
+  spocName: optionalContactNameSchema.optional(),
+  spocEmail: optionalContactEmailSchema.optional(),
+  spocPhone: optionalContactPhoneSchema.optional(),
+});
+
+const optionalLongTextSchema = z
+  .string()
+  .trim()
+  .max(2000, "Text is too long.")
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => (value ? value : null));
+
+const optionalFieldTextSchema = z
+  .string()
+  .trim()
+  .max(200, "Value is too long.")
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => (value ? value : null));
+
+export const integrationInventorySchema = z.object({
+  referenceId: z
+    .string()
+    .trim()
+    .min(1, "Reference ID is required.")
+    .max(40, "Reference ID is too long.")
+    .transform((value) => normalizeReferenceId(value))
+    .refine((value): value is string => Boolean(value) && /^INT-\S/.test(value), {
+      message: "Reference ID must start with INT-.",
+    }),
+  name: z.string().trim().min(1, "Integration is required.").max(120, "Integration name is too long."),
+  description: optionalLongTextSchema.optional(),
+  mvp: z.boolean().default(false),
+  type: z.enum(INTEGRATION_TYPES).default("In Scope"),
+  direction: z.enum(INTEGRATION_DIRECTIONS),
+  mode: z.enum(INTEGRATION_MODES),
+  format: z.enum(INTEGRATION_FORMATS),
+  dataSource: optionalFieldTextSchema.optional(),
+  dataTarget: optionalFieldTextSchema.optional(),
+  responsible: optionalContactNameSchema.optional(),
+  pillar: optionalContactNameSchema.optional(),
+});
+
+const optionalDetailsTextSchema = z
+  .string()
+  .trim()
+  .max(8000, "Text is too long.")
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => (value ? value : null));
+
+const optionalRichTextSchema = z
+  .string()
+  .optional()
+  .or(z.literal(""))
+  .transform((value) => normalizeRichText(value))
+  .refine((value) => value == null || value.length <= 20000, {
+    message: "Text is too long.",
+  });
+
+export const integrationDetailsSchema = z.object({
+  overview: optionalRichTextSchema.optional(),
+  assumptions: z
+    .array(z.string().trim().max(2000, "Assumption is too long."))
+    .max(30, "Too many assumptions.")
+    .optional()
+    .default([])
+    .transform((values) => values.filter((value) => value.length > 0)),
+  source: optionalDetailsTextSchema.optional(),
+  target: optionalDetailsTextSchema.optional(),
+  interfaceType: z
+    .union([z.enum(INTEGRATION_INTERFACE_TYPES), z.literal(""), z.null(), z.undefined()])
+    .transform((value) => (value ? value : null)),
+  interfaceFormat: z
+    .union([z.enum(INTEGRATION_FORMATS), z.literal(""), z.null(), z.undefined()])
+    .transform((value) => (value ? value : null)),
+  dataDependencies: optionalDetailsTextSchema.optional(),
+  jobDependencies: optionalDetailsTextSchema.optional(),
+  frequency: optionalDetailsTextSchema.optional(),
+  scheduledMechanism: optionalDetailsTextSchema.optional(),
+  performanceConsiderations: optionalDetailsTextSchema.optional(),
+  interfaceTimeoutValue: optionalDetailsTextSchema.optional(),
+  expectedDataVolume: optionalDetailsTextSchema.optional(),
+  solutionApproach: optionalRichTextSchema.optional(),
+});
+
+export const integrationProjectSchema = z.object({
+  clientId: z.string().min(1, "Client is required."),
+  name: z.string().trim().min(1, "Project name is required.").max(120, "Project name is too long."),
+  productionManager: z
+    .union([
+      z.string().max(120, "Project manager name is too long."),
+      z.null(),
+      z.undefined(),
+    ])
+    .optional()
+    .transform((value) => normalizeProductionManagerName(typeof value === "string" ? value : null)),
+  active: z.boolean().default(true),
 });
 
 export const projectBurnStatusSchema = z.object({
@@ -95,6 +226,10 @@ export const projectSchema = z
     devRate: z.coerce.number().finite().optional().nullable(),
     estimatedPmHours: z.coerce.number().finite().optional().nullable(),
     pmRate: z.coerce.number().finite().optional().nullable(),
+    quotedHours: z.coerce.number().finite().optional().nullable(),
+    quotedDevelopmentHours: z.coerce.number().finite().optional().nullable(),
+    quotedDeliveryLeadHours: z.coerce.number().finite().optional().nullable(),
+    quotedTechnicalLeadershipHours: z.coerce.number().finite().optional().nullable(),
     productionManager: z
       .union([
         z.string().max(120, "Project manager name is too long."),
@@ -141,6 +276,29 @@ export const projectSchema = z
         });
       }
     }
+    if (data.type === "SOW") {
+      const sowQuoted = [
+        ["quotedDevelopmentHours", "Development quoted hours"],
+        ["quotedDeliveryLeadHours", "Delivery Lead quoted hours"],
+        ["quotedTechnicalLeadershipHours", "Technical Leadership quoted hours"],
+      ] as const;
+      for (const [path, label] of sowQuoted) {
+        const value = data[path];
+        if (value == null || Number.isNaN(value)) {
+          ctx.addIssue({
+            code: "custom",
+            path: [path],
+            message: `${label} are required for SOW projects.`,
+          });
+        } else if (value < 0) {
+          ctx.addIssue({
+            code: "custom",
+            path: [path],
+            message: `${label} cannot be negative.`,
+          });
+        }
+      }
+    }
     if (data.type === "CAPITAL_TIME_AND_MATERIALS") {
       const capitalFields = [
         ["estimatedDevHours", "Estimated Dev Hours"],
@@ -166,6 +324,8 @@ export const timeEntryItemSchema = z.object({
   hoursUsed: nonNegativeNumber.optional(),
   developmentHours: nonNegativeNumber.optional(),
   pmHours: nonNegativeNumber.optional(),
+  deliveryLeadHours: nonNegativeNumber.optional(),
+  technicalLeadershipHours: nonNegativeNumber.optional(),
 });
 
 export const timeEntryBulkSchema = z.object({
@@ -236,6 +396,10 @@ export const userUpdateSchema = z.object({
 });
 
 export type ClientInput = z.infer<typeof clientSchema>;
+export type IntegrationClientInput = z.infer<typeof integrationClientSchema>;
+export type IntegrationProjectInput = z.infer<typeof integrationProjectSchema>;
+export type IntegrationInventoryInput = z.infer<typeof integrationInventorySchema>;
+export type IntegrationDetailsInput = z.infer<typeof integrationDetailsSchema>;
 export type ProjectInput = z.infer<typeof projectSchema>;
 export type TimeEntryBulkInput = z.infer<typeof timeEntryBulkSchema>;
 export type ReportQueryInput = z.infer<typeof reportQuerySchema>;

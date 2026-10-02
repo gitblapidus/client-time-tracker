@@ -5,6 +5,8 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { currentYearMonth, parseYearMonth, toYearMonthInput } from "@/lib/months";
 import { PROJECT_TYPE_LABELS, currencySymbol, inheritedCapitalRates } from "@/lib/calculations";
+import { SOW_HOUR_LINES, totalSowHours } from "@/lib/time-hours";
+import { formatHours } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Combobox } from "@/components/ui/combobox";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -13,6 +15,7 @@ import { FilterSelect } from "@/components/ui/filter-select";
 import { Label } from "@/components/ui/label";
 import { NumericInput } from "@/components/ui/numeric-input";
 import { ActiveStatusSelect } from "@/components/ui/active-status-select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 export type ProjectRecord = {
   id: string;
@@ -29,6 +32,10 @@ export type ProjectRecord = {
   devRate?: number | null;
   estimatedPmHours?: number | null;
   pmRate?: number | null;
+  quotedHours?: number | null;
+  quotedDevelopmentHours?: number | null;
+  quotedDeliveryLeadHours?: number | null;
+  quotedTechnicalLeadershipHours?: number | null;
   productionManager: string | null;
   active: boolean;
 };
@@ -69,6 +76,11 @@ export function ProjectFormDialog({
   const [devRate, setDevRate] = useState(project?.devRate ?? 0);
   const [estimatedPmHours, setEstimatedPmHours] = useState(project?.estimatedPmHours ?? 0);
   const [pmRate, setPmRate] = useState(project?.pmRate ?? 0);
+  const [quotedDevelopmentHours, setQuotedDevelopmentHours] = useState(project?.quotedDevelopmentHours ?? 0);
+  const [quotedDeliveryLeadHours, setQuotedDeliveryLeadHours] = useState(project?.quotedDeliveryLeadHours ?? 0);
+  const [quotedTechnicalLeadershipHours, setQuotedTechnicalLeadershipHours] = useState(
+    project?.quotedTechnicalLeadershipHours ?? 0,
+  );
   const [productionManager, setProductionManager] = useState(project?.productionManager ?? "");
   const [productionManagers, setProductionManagers] = useState<string[]>([]);
   const [active, setActive] = useState(project?.active ?? true);
@@ -92,6 +104,11 @@ export function ProjectFormDialog({
     setDevRate(project?.devRate ?? inherited.devRate);
     setEstimatedPmHours(project?.estimatedPmHours ?? 0);
     setPmRate(project?.pmRate ?? inherited.pmRate);
+    setQuotedDevelopmentHours(
+      project?.quotedDevelopmentHours ?? (project?.type === "SOW" ? project.quotedHours ?? 0 : 0),
+    );
+    setQuotedDeliveryLeadHours(project?.quotedDeliveryLeadHours ?? 0);
+    setQuotedTechnicalLeadershipHours(project?.quotedTechnicalLeadershipHours ?? 0);
     setProductionManager(project?.productionManager ?? "");
     setActive(project?.active ?? true);
     api<{ productionManagers: string[] }>("/api/production-managers")
@@ -122,6 +139,9 @@ export function ProjectFormDialog({
         devRate: type === "CAPITAL_TIME_AND_MATERIALS" ? devRate : null,
         estimatedPmHours: type === "CAPITAL_TIME_AND_MATERIALS" ? estimatedPmHours : null,
         pmRate: type === "CAPITAL_TIME_AND_MATERIALS" ? pmRate : null,
+        quotedDevelopmentHours: type === "SOW" ? quotedDevelopmentHours : null,
+        quotedDeliveryLeadHours: type === "SOW" ? quotedDeliveryLeadHours : null,
+        quotedTechnicalLeadershipHours: type === "SOW" ? quotedTechnicalLeadershipHours : null,
         productionManager,
         active,
       };
@@ -204,6 +224,7 @@ export function ProjectFormDialog({
               <option value="MANAGED_SERVICE">{PROJECT_TYPE_LABELS.MANAGED_SERVICE}</option>
               <option value="TIME_AND_MATERIALS">{PROJECT_TYPE_LABELS.TIME_AND_MATERIALS}</option>
               <option value="CAPITAL_TIME_AND_MATERIALS">{PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS}</option>
+              <option value="SOW">{PROJECT_TYPE_LABELS.SOW}</option>
             </FilterSelect>
           </div>
           <div className="space-y-1.5">
@@ -285,6 +306,64 @@ export function ProjectFormDialog({
                 <NumericInput id="estimated-pm-hours" className="w-full" value={estimatedPmHours} onValueChange={setEstimatedPmHours} />
               </div>
             </>
+          ) : type === "SOW" ? (
+            <div className="space-y-1.5">
+              <Label>Quoted Hours</Label>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Role</TableHead>
+                    <TableHead className="text-right">Quoted Hours</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {SOW_HOUR_LINES.map((line) => {
+                    const value =
+                      line.key === "developmentHours"
+                        ? quotedDevelopmentHours
+                        : line.key === "deliveryLeadHours"
+                          ? quotedDeliveryLeadHours
+                          : quotedTechnicalLeadershipHours;
+                    const onValueChange =
+                      line.key === "developmentHours"
+                        ? setQuotedDevelopmentHours
+                        : line.key === "deliveryLeadHours"
+                          ? setQuotedDeliveryLeadHours
+                          : setQuotedTechnicalLeadershipHours;
+                    return (
+                      <TableRow key={line.key}>
+                        <TableCell className="font-medium">{line.label}</TableCell>
+                        <TableCell>
+                          <div className="flex justify-end">
+                            <NumericInput
+                              id={`quoted-${line.key}`}
+                              aria-label={`${line.label} quoted hours`}
+                              value={value}
+                              onValueChange={onValueChange}
+                            />
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell className="font-medium text-[var(--muted-foreground)]">Total</TableCell>
+                    <TableCell className="text-right font-medium tabular-nums">
+                      {formatHours(
+                        totalSowHours(
+                          quotedDevelopmentHours,
+                          quotedDeliveryLeadHours,
+                          quotedTechnicalLeadershipHours,
+                        ),
+                      )}
+                    </TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                Remaining is the total quoted hours minus hours used across all three roles.
+              </p>
+            </div>
           ) : (
             <p className="rounded-[var(--radius-md)] bg-[var(--muted)] px-3 py-2 text-sm text-[var(--muted-foreground)] transition-opacity duration-150">
               Time & Materials projects track Development Hours and PM Hours. Monthly allocation and carryover do not apply.

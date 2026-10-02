@@ -1,8 +1,9 @@
 import ExcelJS from "exceljs";
 import type { BurnProject, BurnTotals } from "@/lib/burn-rate";
-import { formatMoney, sortBurnProjects } from "@/lib/burn-rate";
-import { PROJECT_TYPE_LABELS } from "@/lib/calculations";
+import { formatGroupingSpend, formatMoney, sortBurnProjects } from "@/lib/burn-rate";
+import { PROJECT_TYPE_LABELS, roundHours } from "@/lib/calculations";
 import { formatYearMonth } from "@/lib/months";
+import { sowProjectLabel, sowReportTotals, type SowReportRow } from "@/lib/sow-report";
 import { formatHours, nextMonthHint } from "@/lib/utils";
 
 export type ReportExportRow = {
@@ -19,6 +20,8 @@ export type ReportExportRow = {
   pmHours: number | null;
   hoursRemaining: number | null;
   hoursForNextMonth: number | null;
+  currency?: string | null;
+  totalSpend?: number | null;
 };
 
 export type ReportExportSummary = {
@@ -34,6 +37,7 @@ const HEADER_FILL: ExcelJS.FillPattern = {
   pattern: "solid",
   fgColor: { argb: "FFD9D9D9" },
 };
+const GROUP_FILL: ExcelJS.FillPattern = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC7D3F5" } };
 const THIN: Partial<ExcelJS.Border> = { style: "thin", color: { argb: "FFA6A6A6" } };
 const BORDERS: Partial<ExcelJS.Borders> = { left: THIN, right: THIN, top: THIN, bottom: THIN };
 const HEADER_FONT: Partial<ExcelJS.Font> = { name: "Calibri", size: 14, bold: true, color: { argb: "FF000000" } };
@@ -63,6 +67,7 @@ export const weeklyManagedHeaders = [
   "CarryOver",
 ];
 export const weeklyTmHeaders = ["Project", "Development Hours", "PM Hours", "Total"];
+export const weeklyTmSpendHeaders = ["Project", "Development Hours", "PM Hours", "Total", "Total Spend"];
 export const tmHeaders = ["Month", "Client", "Project", "Project Manager", "Development Hours", "PM Hours", "Total"];
 
 export function managedExportLine(row: ReportExportRow, compact = false) {
@@ -80,7 +85,7 @@ export function managedExportLine(row: ReportExportRow, compact = false) {
   return compact ? [line[2], line[4], line[5], line[6], line[7], line[8]] : line;
 }
 
-export function tmExportLine(row: ReportExportRow, compact = false) {
+export function tmExportLine(row: ReportExportRow, compact = false, includeSpend = false) {
   const line = [
     formatYearMonth(row.year, row.month),
     row.clientName,
@@ -90,7 +95,37 @@ export function tmExportLine(row: ReportExportRow, compact = false) {
     row.pmHours,
     row.hoursUsed,
   ];
-  return compact ? [line[2], line[4], line[5], line[6]] : line;
+  const exported = compact ? [line[2], line[4], line[5], line[6]] : line;
+  if (includeSpend) {
+    exported.push(formatMoney(row.totalSpend, row.currency));
+  }
+  return exported;
+}
+
+export function weeklyManagedTotalLine(rows: ReportExportRow[]) {
+  return [
+    "Total",
+    roundHours(rows.reduce((sum, row) => sum + (row.hoursAvailable ?? 0), 0)),
+    roundHours(rows.reduce((sum, row) => sum + row.hoursUsed, 0)),
+    roundHours(rows.reduce((sum, row) => sum + (row.hoursRemaining ?? 0), 0)),
+    roundHours(rows.reduce((sum, row) => sum + (row.hoursForNextMonth ?? 0), 0)),
+    "",
+  ];
+}
+
+export function weeklyTmSpendTotalLine(rows: ReportExportRow[]) {
+  return [
+    "Total",
+    roundHours(rows.reduce((sum, row) => sum + (row.developmentHours ?? 0), 0)),
+    roundHours(rows.reduce((sum, row) => sum + (row.pmHours ?? 0), 0)),
+    roundHours(rows.reduce((sum, row) => sum + row.hoursUsed, 0)),
+    formatGroupingSpend(rows),
+  ];
+}
+
+function withWeeklyTotal<T>(lines: T[], total: T, compact: boolean) {
+  if (!compact || lines.length === 0) return lines;
+  return [...lines, total];
 }
 
 export function summaryExportLines(summary: ReportExportSummary) {
@@ -116,17 +151,31 @@ export function buildReportWorkbook(options: {
   styleSummarySheet(workbook.addWorksheet("Summary"), summaryExportLines(options.summary));
   styleManagedSheet(
     workbook.addWorksheet("Managed Service"),
-    options.managed.map((row) => managedExportLine(row, compact)),
+    withWeeklyTotal(
+      options.managed.map((row) => managedExportLine(row, compact)),
+      weeklyManagedTotalLine(options.managed),
+      compact,
+    ),
     compact,
   );
   styleTmSheet(
     workbook.addWorksheet("Time & Materials"),
-    options.timeAndMaterials.map((row) => tmExportLine(row, compact)),
+    withWeeklyTotal(
+      options.timeAndMaterials.map((row) => tmExportLine(row, compact, compact)),
+      weeklyTmSpendTotalLine(options.timeAndMaterials),
+      compact,
+    ),
+    compact,
     compact,
   );
   styleTmSheet(
     workbook.addWorksheet(PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS),
-    capitalTimeAndMaterials.map((row) => tmExportLine(row, compact)),
+    withWeeklyTotal(
+      capitalTimeAndMaterials.map((row) => tmExportLine(row, compact, compact)),
+      weeklyTmSpendTotalLine(capitalTimeAndMaterials),
+      compact,
+    ),
+    compact,
     compact,
   );
   return workbook;
@@ -169,8 +218,20 @@ function styleManagedSheet(
   });
   lines.forEach((line) => {
     const row = sheet.addRow(line);
+    const isTotal = line[0] === "Total";
     row.eachCell({ includeEmpty: true }, (cell, col) => {
       cell.border = BORDERS;
+      if (isTotal) {
+        cell.fill = GROUP_FILL;
+        cell.font = { ...DATA_FONT, bold: true };
+        if (col >= numericStart && col <= numericEnd) {
+          cell.alignment = { horizontal: "center" };
+        }
+        if (col === remainingCol && typeof cell.value === "number" && cell.value < 0) {
+          cell.font = { ...NEGATIVE_FONT, bold: true };
+        }
+        return;
+      }
       if (col === carryoverCol) {
         const overage = typeof cell.value === "string" && cell.value.includes("overage");
         cell.font = overage ? OVERAGE_FONT : CARRYOVER_FONT;
@@ -189,8 +250,13 @@ function styleManagedSheet(
   });
 }
 
-function styleTmSheet(sheet: ExcelJS.Worksheet, lines: ReturnType<typeof tmExportLine>[], compact = false) {
-  const headers = compact ? weeklyTmHeaders : tmHeaders;
+function styleTmSheet(
+  sheet: ExcelJS.Worksheet,
+  lines: ReturnType<typeof tmExportLine>[],
+  compact = false,
+  includeSpend = false,
+) {
+  const headers = compact ? (includeSpend ? weeklyTmSpendHeaders : weeklyTmHeaders) : tmHeaders;
   const leftAlignThrough = compact ? 1 : 4;
   const numericStart = compact ? 2 : 5;
   sheet.views = [{ showGridLines: false, state: "frozen", ySplit: 1, activeCell: "A2" }];
@@ -205,9 +271,11 @@ function styleTmSheet(sheet: ExcelJS.Worksheet, lines: ReturnType<typeof tmExpor
   });
   lines.forEach((line) => {
     const row = sheet.addRow(line);
+    const isTotal = line[0] === "Total";
     row.eachCell({ includeEmpty: true }, (cell, col) => {
-      cell.font = DATA_FONT;
+      cell.font = isTotal ? { ...DATA_FONT, bold: true } : DATA_FONT;
       cell.border = BORDERS;
+      if (isTotal) cell.fill = GROUP_FILL;
       if (col >= numericStart) cell.alignment = { horizontal: "center" };
     });
   });
@@ -216,7 +284,6 @@ function styleTmSheet(sheet: ExcelJS.Worksheet, lines: ReturnType<typeof tmExpor
 const ESTIMATE_FILL: ExcelJS.FillPattern = { type: "pattern", pattern: "solid", fgColor: { argb: "FFEEF2F6" } };
 const ACTUAL_FILL: ExcelJS.FillPattern = { type: "pattern", pattern: "solid", fgColor: { argb: "FFECFDF5" } };
 const REMAINING_FILL: ExcelJS.FillPattern = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFBEB" } };
-const GROUP_FILL: ExcelJS.FillPattern = { type: "pattern", pattern: "solid", fgColor: { argb: "FFC7D3F5" } };
 
 export function buildBurnRateWorkbook(projects: BurnProject[], totals: BurnTotals) {
   const workbook = new ExcelJS.Workbook();
@@ -312,5 +379,61 @@ export function buildBurnRateWorkbook(projects: BurnProject[], totals: BurnTotal
     });
   });
 
+  return workbook;
+}
+
+export function buildSowWorkbook(rows: SowReportRow[]) {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("SOW");
+  const totals = sowReportTotals(rows);
+  sheet.views = [{ showGridLines: false, state: "frozen", ySplit: 1, activeCell: "A2" }];
+  sheet.columns = [{ width: 40 }, { width: 16 }, { width: 16 }, { width: 16 }, { width: 20 }, { width: 14 }, { width: 14 }];
+  const header = sheet.addRow([
+    "Project",
+    "Quoted Hours",
+    "Development",
+    "Delivery Lead",
+    "Technical Leadership",
+    "Total",
+    "Remaining",
+  ]);
+  header.height = 19;
+  header.eachCell((cell, col) => {
+    cell.font = HEADER_FONT;
+    cell.fill = HEADER_FILL;
+    cell.border = BORDERS;
+    cell.alignment = { horizontal: col === 1 ? "left" : "right", vertical: "middle" };
+  });
+  rows.forEach((item) => {
+    const row = sheet.addRow([
+      sowProjectLabel(item),
+      item.quotedHours,
+      item.developmentHours,
+      item.deliveryLeadHours,
+      item.technicalLeadershipHours,
+      item.hoursUsed,
+      item.hoursRemaining,
+    ]);
+    row.eachCell({ includeEmpty: true }, (cell, col) => {
+      cell.font = col === 7 && item.hoursRemaining < 0 ? NEGATIVE_FONT : DATA_FONT;
+      cell.border = BORDERS;
+      cell.alignment = { horizontal: col === 1 ? "left" : "right" };
+    });
+  });
+  const total = sheet.addRow([
+    "Total",
+    totals.quotedHours,
+    totals.developmentHours,
+    totals.deliveryLeadHours,
+    totals.technicalLeadershipHours,
+    totals.hoursUsed,
+    totals.hoursRemaining,
+  ]);
+  total.eachCell({ includeEmpty: true }, (cell, col) => {
+    cell.font = { ...DATA_FONT, bold: true };
+    cell.fill = GROUP_FILL;
+    cell.border = BORDERS;
+    cell.alignment = { horizontal: col === 1 ? "left" : "right" };
+  });
   return workbook;
 }

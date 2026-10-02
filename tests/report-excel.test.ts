@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildBurnProject, buildBurnTotals } from "../src/lib/burn-rate";
-import { buildBurnRateWorkbook, buildReportWorkbook, managedExportLine } from "../src/lib/report-excel";
+import { buildBurnRateWorkbook, buildReportWorkbook, buildSowWorkbook, managedExportLine } from "../src/lib/report-excel";
 
 const managedRow = {
   year: 2026,
@@ -92,6 +92,79 @@ describe("Excel report formatting", () => {
     expect(compactManaged?.getRow(2).getCell(1).value).toBe("Application Support");
     expect(compactManaged?.getRow(2).getCell(4).font?.color?.argb).toBe("FFFF0000");
 
+    const compactTmWorkbook = buildReportWorkbook({
+      managed: [],
+      timeAndMaterials: [
+        {
+          year: 2026,
+          month: 8,
+          clientName: "DBNEXT",
+          projectName: "DBN_Additional Monthly Hours",
+          productionManager: "Brad Lapidus",
+          projectType: "TIME_AND_MATERIALS",
+          monthlyHours: null,
+          hoursAvailable: null,
+          hoursUsed: 23.5,
+          developmentHours: 19,
+          pmHours: 4.5,
+          hoursRemaining: null,
+          hoursForNextMonth: null,
+          currency: "USD",
+          totalSpend: 1880,
+        },
+      ],
+      summary: {
+        totalAvailableHours: 0,
+        totalUsedHours: 23.5,
+        totalRemainingHours: 0,
+        averageMonthlyUsage: 23.5,
+        utilizationPercent: 0,
+      },
+      compact: true,
+    });
+    const compactTm = compactTmWorkbook.getWorksheet("Time & Materials");
+    expect(compactTm?.getRow(1).getCell(5).value).toBe("Total Spend");
+    expect(compactTm?.getRow(2).getCell(5).value).toBe("$1,880");
+    expect(compactTm?.getRow(3).getCell(1).value).toBe("Total");
+    expect(compactTm?.getRow(3).getCell(5).value).toBe("$1,880");
+
+    const compactCapitalWorkbook = buildReportWorkbook({
+      managed: [],
+      timeAndMaterials: [],
+      capitalTimeAndMaterials: [
+        {
+          year: 2026,
+          month: 9,
+          clientName: "KION",
+          projectName: "KION Capital ERP",
+          productionManager: null,
+          projectType: "CAPITAL_TIME_AND_MATERIALS",
+          monthlyHours: null,
+          hoursAvailable: null,
+          hoursUsed: 15,
+          developmentHours: 10,
+          pmHours: 5,
+          hoursRemaining: null,
+          hoursForNextMonth: null,
+          currency: "EUR",
+          totalSpend: 1575,
+        },
+      ],
+      summary: {
+        totalAvailableHours: 0,
+        totalUsedHours: 15,
+        totalRemainingHours: 0,
+        averageMonthlyUsage: 15,
+        utilizationPercent: 0,
+      },
+      compact: true,
+    });
+    const compactCapital = compactCapitalWorkbook.getWorksheet("Capital-Time & Material");
+    expect(compactCapital?.getRow(1).getCell(5).value).toBe("Total Spend");
+    expect(compactCapital?.getRow(2).getCell(5).value).toBe("1,575 €");
+    expect(compactCapital?.getRow(3).getCell(1).value).toBe("Total");
+    expect(compactCapital?.getRow(3).getCell(5).value).toBe("1,575 €");
+
     const summary = workbook.getWorksheet("Summary");
     expect(summary?.getRow(4).getCell(2).numFmt).toBe("0.00");
     expect(summary?.getRow(5).getCell(2).numFmt).toBe('0.00"%"');
@@ -135,5 +208,55 @@ describe("Excel report formatting", () => {
     expect(estimateFill?.fgColor?.argb).toBe("FFEEF2F6");
     expect(actualFill?.fgColor?.argb).toBe("FFECFDF5");
     expect(remainingFill?.fgColor?.argb).toBe("FFFFFBEB");
+  });
+});
+
+describe("SOW Excel report", () => {
+  it("exports quoted hours, role hours, total, and remaining", async () => {
+    const workbook = buildSowWorkbook([
+      {
+        projectId: "p1",
+        clientName: "Acme",
+        projectName: "SOW Build",
+        productionManager: "Morgan",
+        quotedHours: 80,
+        developmentHours: 20,
+        deliveryLeadHours: 6,
+        technicalLeadershipHours: 4,
+        hoursUsed: 30,
+        hoursRemaining: 50,
+      },
+      {
+        projectId: "p2",
+        clientName: "Beta",
+        projectName: "SOW Support",
+        productionManager: null,
+        quotedHours: 20,
+        developmentHours: 18,
+        deliveryLeadHours: 5,
+        technicalLeadershipHours: 2,
+        hoursUsed: 25,
+        hoursRemaining: -5,
+      },
+    ]);
+    const sheet = workbook.getWorksheet("SOW");
+    expect(sheet).toBeDefined();
+    expect(sheet?.getRow(1).getCell(1).value).toBe("Project");
+    expect(sheet?.getRow(1).getCell(2).value).toBe("Quoted Hours");
+    expect(sheet?.getRow(1).getCell(3).value).toBe("Development");
+    expect(sheet?.getRow(1).getCell(4).value).toBe("Delivery Lead");
+    expect(sheet?.getRow(1).getCell(5).value).toBe("Technical Leadership");
+    expect(sheet?.getRow(1).getCell(6).value).toBe("Total");
+    expect(sheet?.getRow(1).getCell(7).value).toBe("Remaining");
+    expect(sheet?.getRow(2).getCell(1).value).toBe("Acme — SOW Build");
+    expect(sheet?.getRow(2).getCell(3).value).toBe(20);
+    expect(sheet?.getRow(2).getCell(6).value).toBe(30);
+    expect(sheet?.getRow(2).getCell(7).value).toBe(50);
+    expect(sheet?.getRow(3).getCell(7).font?.color?.argb).toBe("FFFF0000");
+    expect(sheet?.getRow(4).getCell(1).value).toBe("Total");
+    expect(sheet?.getRow(4).getCell(2).value).toBe(100);
+    expect(sheet?.getRow(4).getCell(3).value).toBe(38);
+    expect(sheet?.getRow(4).getCell(6).value).toBe(55);
+    expect(sheet?.getRow(4).getCell(7).value).toBe(45);
   });
 });

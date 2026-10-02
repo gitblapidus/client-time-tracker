@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { monthKey } from "@/lib/calculations";
 import { jsonError, requireSession } from "@/lib/http";
 import { parseListParam } from "@/lib/query-params";
+import { sowReportTotals } from "@/lib/sow-report";
 import { reportQuerySchema } from "@/lib/validations";
-import { buildBurnRateReport, buildReport } from "@/services/time-service";
+import { buildBurnRateReport, buildReport, buildSowReport } from "@/services/time-service";
 
 export async function GET(request: Request) {
   try {
@@ -20,6 +21,21 @@ export async function GET(request: Request) {
     });
     if (monthKey(query.startYear, query.startMonth) > monthKey(query.endYear, query.endMonth)) {
       return NextResponse.json({ error: "Start month must be on or before end month." }, { status: 400 });
+    }
+    if (searchParams.get("reportType") === "sow") {
+      const sow = await buildSowReport(query);
+      const totals = sowReportTotals(sow.rows);
+      return NextResponse.json({
+        rows: [],
+        summary: {
+          totalAvailableHours: totals.quotedHours,
+          totalUsedHours: totals.hoursUsed,
+          totalRemainingHours: totals.hoursRemaining,
+          averageMonthlyUsage: 0,
+          utilizationPercent: totals.quotedHours > 0 ? (totals.hoursUsed / totals.quotedHours) * 100 : 0,
+        },
+        sow,
+      });
     }
     if (searchParams.get("reportType") === "burn-rate") {
       const burnRate = await buildBurnRateReport(query);

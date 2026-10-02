@@ -1,5 +1,6 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import { groupHeaderBgClass } from "@/components/ui/project-type-heading";
 
 export function Table({ className, ...props }: React.ComponentProps<"table">) {
   return (
@@ -44,10 +45,13 @@ export function TableCell({ className, ...props }: React.ComponentProps<"td">) {
 
 export function TableSectionRow({ colSpan, children }: { colSpan: number; children: React.ReactNode }) {
   return (
-    <TableRow className="hover:bg-[color-mix(in_srgb,var(--primary)_10%,white)]">
+    <TableRow className={cn(groupHeaderBgClass, "hover:bg-[color-mix(in_srgb,var(--primary)_25%,white)]")}>
       <TableCell
         colSpan={colSpan}
-        className="bg-[color-mix(in_srgb,var(--primary)_10%,white)] py-2.5 text-xs font-bold uppercase tracking-[0.06em] text-[var(--secondary)]"
+        className={cn(
+          groupHeaderBgClass,
+          "py-2.5 text-xs font-bold uppercase tracking-[0.06em] text-[var(--secondary)]",
+        )}
       >
         {children}
       </TableCell>

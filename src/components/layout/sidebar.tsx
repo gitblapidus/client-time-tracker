@@ -9,8 +9,10 @@ import {
   ChevronDown,
   ClipboardList,
   Clock3,
+  FileCode2,
   LayoutDashboard,
   LogOut,
+  Network,
   Settings,
   Shield,
 } from "lucide-react";
@@ -36,6 +38,7 @@ type NavGroup = {
 type NavApp = {
   id: string;
   label: string;
+  icon: ComponentType<{ className?: string }>;
   groups: NavGroup[];
 };
 
@@ -43,6 +46,7 @@ const APPS: NavApp[] = [
   {
     id: "time-project-management",
     label: "Time Tracking",
+    icon: Clock3,
     groups: [
       {
         id: "overview",
@@ -65,29 +69,52 @@ const APPS: NavApp[] = [
           { href: "/admin", label: "Administration", icon: Shield, admin: true },
         ],
       },
-      {
-        id: "system",
-        label: "System",
-        items: [{ href: "/settings", label: "Settings", icon: Settings }],
-      },
     ],
   },
   {
     id: "project-estimates",
     label: "Project Estimates",
+    icon: ClipboardList,
     groups: [],
   },
+  {
+    id: "integration-spec",
+    label: "Integration Spec",
+    icon: FileCode2,
+    groups: [
+      {
+        id: "integration-inventory",
+        label: "Inventory",
+        items: [
+          {
+            href: "/integration/inventory",
+            label: "Inventory of Integrations",
+            icon: Network,
+          },
+        ],
+      },
+      {
+        id: "integration-administration",
+        label: "Administration",
+        items: [{ href: "/integration/clients", label: "Clients", icon: Building2 }],
+      },
+    ],
+  },
 ];
+
+const SETTINGS_ITEM: NavItem = { href: "/settings", label: "Settings", icon: Settings };
 
 const SECTION_STORAGE_KEY = "dss.sidebarSections";
 
 const DEFAULT_OPEN: Record<string, boolean> = {
   "time-project-management": true,
   "project-estimates": true,
+  "integration-spec": true,
   overview: true,
   "time-management": true,
   administration: true,
-  system: true,
+  "integration-inventory": true,
+  "integration-administration": true,
 };
 
 function itemIsActive(pathname: string, href: string) {
@@ -234,6 +261,7 @@ export function Sidebar({
   const collapsedItems = APPS.flatMap((app) =>
     app.groups.flatMap((group) => visibleItems(group.items, role)),
   );
+  const emptyApps = APPS.filter((app) => app.groups.length === 0);
 
   return (
     <div className="flex h-full flex-col bg-[var(--sidebar)] text-[var(--sidebar-foreground)]">
@@ -264,17 +292,22 @@ export function Sidebar({
                 onNavigate={onNavigate}
               />
             ))}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div
-                  className="flex cursor-default items-center justify-center rounded-[var(--radius-md)] px-2 py-2 text-[var(--sidebar-foreground)]"
-                  aria-label="Project Estimates. No pages yet."
-                >
-                  <ClipboardList className="h-4 w-4" />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="right">Project Estimates — No pages yet</TooltipContent>
-            </Tooltip>
+            {emptyApps.map((app) => {
+              const Icon = app.icon;
+              return (
+                <Tooltip key={app.id}>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="flex cursor-default items-center justify-center rounded-[var(--radius-md)] px-2 py-2 text-[var(--sidebar-foreground)]"
+                      aria-label={`${app.label}. No pages yet.`}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{app.label} — No pages yet</TooltipContent>
+                </Tooltip>
+              );
+            })}
           </div>
         ) : (
           APPS.map((app) => {
@@ -328,6 +361,14 @@ export function Sidebar({
           })
         )}
       </nav>
+      <div className={cn("px-3 pb-1", collapsed && "px-2")}>
+        <NavLink
+          item={SETTINGS_ITEM}
+          active={itemIsActive(pathname, SETTINGS_ITEM.href)}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
+      </div>
       <div className="border-t border-white/10 p-3">
         <div className={cn("mb-2 flex items-center gap-3 rounded-[var(--radius-md)] px-2 py-2", collapsed && "justify-center px-0")}>
           <Avatar name={userName} />

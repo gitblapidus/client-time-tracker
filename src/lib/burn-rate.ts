@@ -43,6 +43,43 @@ export function roundMoney(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+export function tmTotalSpend(
+  developmentHours: number | null | undefined,
+  pmHours: number | null | undefined,
+  devRate: number,
+  pmRate: number,
+): number {
+  return roundMoney((developmentHours ?? 0) * devRate + (pmHours ?? 0) * pmRate);
+}
+
+type SpendRow = { totalSpend?: number | null; currency?: string | null };
+
+export function sumGroupingSpend(rows: SpendRow[]): {
+  spend: number | null;
+  currency: string | null;
+} {
+  const currencies = [...new Set(rows.map((row) => row.currency).filter((value): value is string => Boolean(value)))];
+  const spend = roundMoney(rows.reduce((sum, row) => sum + (row.totalSpend ?? 0), 0));
+  if (currencies.length > 1) {
+    return { spend: null, currency: null };
+  }
+  return { spend, currency: currencies[0] ?? null };
+}
+
+export function formatGroupingSpend(rows: SpendRow[]): string {
+  if (rows.length === 0) return "—";
+  const byCurrency = new Map<string, number>();
+  for (const row of rows) {
+    const currency = row.currency === "EUR" ? "EUR" : "USD";
+    byCurrency.set(currency, roundMoney((byCurrency.get(currency) ?? 0) + (row.totalSpend ?? 0)));
+  }
+  const entries = [...byCurrency.entries()].sort(([left], [right]) => left.localeCompare(right));
+  const nonZero = entries.filter(([, amount]) => amount !== 0);
+  return (nonZero.length > 0 ? nonZero : entries)
+    .map(([currency, amount]) => formatMoney(amount, currency))
+    .join(" + ");
+}
+
 export function formatMoney(value: number | null | undefined, currency: string | null | undefined): string {
   if (value == null || Number.isNaN(value) || !currency) {
     return "—";

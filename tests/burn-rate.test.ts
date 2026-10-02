@@ -4,9 +4,11 @@ import {
   buildBurnProject,
   buildBurnTotals,
   formatBurnRateReportText,
+  formatGroupingSpend,
   formatMoney,
   sortBurnProjects,
   splitProjectTitle,
+  tmTotalSpend,
 } from "../src/lib/burn-rate";
 
 describe("burn rate", () => {
@@ -177,5 +179,21 @@ describe("burn rate", () => {
     expect(text).toContain("System Upgrade\tTotal\tIn Progress\t43\t3,720 €");
     expect(text).toContain("\tPM\t\t7\t840 €");
     expect(text).toContain("Maria DB, OpenSearch, & Valkey\tDev\t\t36\t2,880 €");
+  });
+
+  it("calculates T&M total spend as hours times rates", () => {
+    expect(tmTotalSpend(10, 5, 80, 120)).toBe(1400);
+    expect(tmTotalSpend(19, 4.5, 0, 0)).toBe(0);
+  });
+
+  it("formats grouping spend across mixed currencies", () => {
+    expect(formatGroupingSpend([{ totalSpend: 1700, currency: "USD" }])).toBe("$1,700");
+    expect(
+      formatGroupingSpend([
+        { totalSpend: 1760, currency: "EUR" },
+        { totalSpend: 0, currency: "USD" },
+        { totalSpend: 3720, currency: "USD" },
+      ]),
+    ).toBe("1,760 € + $3,720");
   });
 });

@@ -1,6 +1,7 @@
 import { AppError, ConflictError, NotFoundError } from "@/lib/errors";
 import { inheritedCapitalRates } from "@/lib/calculations";
 import { prisma } from "@/lib/prisma";
+import { totalSowHours } from "@/lib/time-hours";
 import { normalizeProductionManagerName } from "@/lib/production-managers";
 import { parseBurnStatus, type BurnStatus } from "@/lib/burn-rate";
 import type { ProjectInput } from "@/lib/validations";
@@ -22,6 +23,7 @@ async function resolveProductionManager(name: string | null | undefined) {
 async function projectData(input: ProjectInput) {
   const isManaged = input.type === "MANAGED_SERVICE";
   const isCapital = input.type === "CAPITAL_TIME_AND_MATERIALS";
+  const isSow = input.type === "SOW";
   const clientDefaults = isCapital
     ? inheritedCapitalRates(
         await prisma.client.findUnique({
@@ -46,6 +48,16 @@ async function projectData(input: ProjectInput) {
     devRate: isCapital ? input.devRate ?? clientDefaults?.devRate ?? 0 : null,
     estimatedPmHours: isCapital ? input.estimatedPmHours ?? 0 : null,
     pmRate: isCapital ? input.pmRate ?? clientDefaults?.pmRate ?? 0 : null,
+    quotedHours: isSow
+      ? totalSowHours(
+          input.quotedDevelopmentHours ?? 0,
+          input.quotedDeliveryLeadHours ?? 0,
+          input.quotedTechnicalLeadershipHours ?? 0,
+        )
+      : null,
+    quotedDevelopmentHours: isSow ? input.quotedDevelopmentHours ?? 0 : null,
+    quotedDeliveryLeadHours: isSow ? input.quotedDeliveryLeadHours ?? 0 : null,
+    quotedTechnicalLeadershipHours: isSow ? input.quotedTechnicalLeadershipHours ?? 0 : null,
     productionManager: await resolveProductionManager(input.productionManager),
     active: input.active,
   };

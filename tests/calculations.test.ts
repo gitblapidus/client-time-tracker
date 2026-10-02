@@ -219,6 +219,25 @@ describe("time and materials", () => {
     expect(result.hoursAvailable).toBeNull();
     expect(result.status).toBe("not_applicable");
   });
+
+  it("treats SOW like Time & Materials for monthly snapshots", () => {
+    const result = calculateMonthSnapshot(
+      {
+        type: "SOW",
+        monthlyHours: null,
+        maximumCarryoverHours: null,
+        openingCarryoverHours: null,
+        startYear: 2026,
+        startMonth: 1,
+      },
+      12,
+      40,
+    );
+    expect(result.hoursUsed).toBe(12);
+    expect(result.hoursAvailable).toBeNull();
+    expect(result.hoursRemaining).toBeNull();
+    expect(result.status).toBe("not_applicable");
+  });
 });
 
 describe("utilization status bands", () => {

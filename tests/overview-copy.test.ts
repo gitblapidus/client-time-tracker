@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatOverviewReportHtml, formatOverviewReportText, formatWeeklyStatusReportText } from "../src/lib/overview-copy";
+import { formatOverviewReportHtml, formatOverviewReportText, formatWeeklyStatusReportHtml, formatWeeklyStatusReportText } from "../src/lib/overview-copy";
 
 const managedRow = {
   year: 2026,
@@ -31,6 +31,26 @@ const tmRow = {
   pmHours: 5,
   hoursRemaining: null,
   hoursForNextMonth: null,
+  currency: "USD",
+  totalSpend: 1400,
+};
+
+const capitalRow = {
+  year: 2026,
+  month: 9,
+  clientName: "KION",
+  projectName: "KION Capital ERP",
+  productionManager: null,
+  projectType: "CAPITAL_TIME_AND_MATERIALS",
+  monthlyHours: null,
+  hoursAvailable: null,
+  hoursUsed: 15,
+  developmentHours: 10,
+  pmHours: 5,
+  hoursRemaining: null,
+  hoursForNextMonth: null,
+  currency: "EUR",
+  totalSpend: 1575,
 };
 
 describe("overview report copy", () => {
@@ -61,6 +81,7 @@ describe("weekly status report copy", () => {
       { totalAvailableHours: 38, totalUsedHours: 35, totalRemainingHours: 18, utilizationPercent: 89.7 },
       [managedRow],
       [tmRow],
+      [capitalRow],
     );
     expect(text).toContain("KION — September 2026");
     expect(text).toContain("Total Available\t38");
@@ -68,7 +89,56 @@ describe("weekly status report copy", () => {
     expect(text).toContain("Project\tAvailable\tUsed\tRemaining\tNext Month");
     expect(text).not.toContain("Month\tClient\tProject");
     expect(text).toContain("KION Managed Services\t38\t20\t+18\t58 (Includes 18 hrs carryover)");
-    expect(text).toContain("VDS_Doofinder Project\t10\t5\t15");
+    expect(text).toContain("Total\t38\t20\t+18\t58");
+    expect(text).toContain("VDS_Doofinder Project\t10\t5\t15\t$1,400");
+    expect(text).toContain("Total\t10\t5\t15\t$1,400");
+    expect(text).toContain("KION Capital ERP\t10\t5\t15\t1,575 €");
+    expect(text).toContain("Total\t10\t5\t15\t1,575 €");
+    expect(text).toContain("Total Spend");
     expect(text).not.toContain("Brad Lapidus");
+  });
+
+  it("includes Total Spend on the HTML grouping total row", () => {
+    const html = formatWeeklyStatusReportHtml(
+      "VANDERSCHOOTEN — September 2026",
+      { totalAvailableHours: 0, totalUsedHours: 30, totalRemainingHours: 0, utilizationPercent: 0 },
+      [],
+      [tmRow],
+      [capitalRow],
+    );
+    expect(html).toContain("Total Spend");
+    expect(html).toMatch(/font-weight:700;[^>]*>\$1,400</);
+    expect(html).toMatch(/font-weight:700;[^>]*>1,575 €</);
+    expect(html).toContain(">$1,400<");
+    expect(html).toContain(">1,575 €<");
+  });
+
+  it("shows each currency on the weekly Total Spend total row", () => {
+    const text = formatWeeklyStatusReportText(
+      "VANDERSCHOOTEN — September 2026",
+      { totalAvailableHours: 0, totalUsedHours: 63, totalRemainingHours: 0, utilizationPercent: 0 },
+      [],
+      [],
+      [
+        { ...capitalRow, projectName: "EUR Project", currency: "EUR", totalSpend: 1760, hoursUsed: 20, developmentHours: 16, pmHours: 4 },
+        { ...capitalRow, projectName: "USD Project", currency: "USD", totalSpend: 3720, hoursUsed: 43, developmentHours: 36, pmHours: 7 },
+      ],
+    );
+    expect(text).toContain("Total\t52\t11\t63\t1,760 € + $3,720");
+  });
+
+  it("includes a Client column when copying multiple clients", () => {
+    const text = formatWeeklyStatusReportText(
+      "KION, VANDERSCHOOTEN — September 2026",
+      { totalAvailableHours: 38, totalUsedHours: 55, totalRemainingHours: 18, utilizationPercent: 89.7 },
+      [managedRow],
+      [tmRow],
+      [capitalRow],
+      true,
+    );
+    expect(text).toContain("Client\tProject\tAvailable\tUsed\tRemaining\tNext Month");
+    expect(text).toContain("KION\tKION Managed Services");
+    expect(text).toContain("Client\tProject\tDevelopment Hours\tPM Hours\tTotal\tTotal Spend");
+    expect(text).toContain("Vanderschooten\tVDS_Doofinder Project");
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { partitionByProjectType, resolveTmHours, totalTmHours } from "../src/lib/time-hours";
+import { partitionByProjectType, resolveSowHours, resolveTmHours, totalSowHours, totalTmHours } from "../src/lib/time-hours";
 import { timeEntryItemSchema } from "../src/lib/validations";
 
 describe("T&M hour splits", () => {
@@ -32,6 +32,7 @@ describe("T&M hour splits", () => {
     expect(grouped.managed.map((row) => row.name)).toEqual(["Support", "Cloud"]);
     expect(grouped.timeAndMaterials.map((row) => row.name)).toEqual(["Integrations"]);
     expect(grouped.capitalTimeAndMaterials).toEqual([]);
+    expect(grouped.sow).toEqual([]);
   });
 
   it("groups Capital-Time & Material projects separately from Time & Materials", () => {
@@ -41,6 +42,46 @@ describe("T&M hour splits", () => {
     ]);
     expect(grouped.timeAndMaterials.map((row) => row.name)).toEqual(["Integrations"]);
     expect(grouped.capitalTimeAndMaterials.map((row) => row.name)).toEqual(["ERP Upgrade"]);
+  });
+
+  it("groups SOW projects separately", () => {
+    const grouped = partitionByProjectType([
+      { projectType: "SOW", name: "Implementation SOW" },
+      { projectType: "TIME_AND_MATERIALS", name: "Integrations" },
+    ]);
+    expect(grouped.timeAndMaterials.map((row) => row.name)).toEqual(["Integrations"]);
+    expect(grouped.sow.map((row) => row.name)).toEqual(["Implementation SOW"]);
+  });
+});
+
+describe("SOW hour splits", () => {
+  it("totals development, delivery lead, and technical leadership hours", () => {
+    expect(totalSowHours(20, 6, 4)).toBe(30);
+  });
+
+  it("treats legacy hoursUsed as development hours", () => {
+    expect(resolveSowHours({ hoursUsed: 20 })).toEqual({
+      developmentHours: 20,
+      deliveryLeadHours: 0,
+      technicalLeadershipHours: 0,
+      hoursUsed: 20,
+    });
+  });
+
+  it("uses stored splits when present", () => {
+    expect(
+      resolveSowHours({
+        hoursUsed: 99,
+        developmentHours: 10,
+        deliveryLeadHours: 3,
+        technicalLeadershipHours: 2,
+      }),
+    ).toEqual({
+      developmentHours: 10,
+      deliveryLeadHours: 3,
+      technicalLeadershipHours: 2,
+      hoursUsed: 15,
+    });
   });
 });
 
@@ -63,6 +104,22 @@ describe("time entry payload", () => {
       projectId: "p2",
       developmentHours: 8,
       pmHours: 1.5,
+    });
+  });
+
+  it("accepts SOW development, delivery lead, and technical leadership hours", () => {
+    expect(
+      timeEntryItemSchema.parse({
+        projectId: "p3",
+        developmentHours: 10,
+        deliveryLeadHours: 3,
+        technicalLeadershipHours: 2,
+      }),
+    ).toMatchObject({
+      projectId: "p3",
+      developmentHours: 10,
+      deliveryLeadHours: 3,
+      technicalLeadershipHours: 2,
     });
   });
 });

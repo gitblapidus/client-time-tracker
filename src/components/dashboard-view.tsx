@@ -39,9 +39,12 @@ type DashboardRow = {
   productionManager: string | null;
   projectType: string;
   monthlyHours: number | null;
+  quotedHours: number | null;
   hoursUsed: number;
   developmentHours: number | null;
   pmHours: number | null;
+  deliveryLeadHours: number | null;
+  technicalLeadershipHours: number | null;
   hoursAvailable: number | null;
   hoursRemaining: number | null;
   hoursForNextMonth: number | null;
@@ -119,6 +122,78 @@ function DashboardSplitHoursTable({
                 Dev {formatHours(row.developmentHours)} · PM {formatHours(row.pmHours)}
               </span>
               <span className="font-medium">Total {formatHours(row.hoursUsed)}</span>
+            </div>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+function DashboardSowTable({
+  rows,
+  SortLabel,
+  onOpenClient,
+}: {
+  rows: DashboardRow[];
+  SortLabel: (props: { label: string; column: SortKey }) => ReactNode;
+  onOpenClient: (clientId: string) => void;
+}) {
+  return (
+    <>
+      <div className="hidden lg:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead><SortLabel label="Client" column="clientName" /></TableHead>
+              <TableHead><SortLabel label="Project" column="projectName" /></TableHead>
+              <TableHead className="text-right">Quoted Hours</TableHead>
+              <TableHead className="text-right">Development</TableHead>
+              <TableHead className="text-right">Delivery Lead</TableHead>
+              <TableHead className="text-right">Technical Leadership</TableHead>
+              <TableHead className="text-right"><SortLabel label="Total" column="hoursUsed" /></TableHead>
+              <TableHead className="text-right"><SortLabel label="Remaining" column="hoursRemaining" /></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow
+                key={row.projectId}
+                className="cursor-pointer"
+                onClick={() => onOpenClient(row.clientId)}
+              >
+                <TableCell className="font-medium">{row.clientName}</TableCell>
+                <TableCell>{row.projectName}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatHours(row.quotedHours)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatHours(row.developmentHours)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatHours(row.deliveryLeadHours)}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatHours(row.technicalLeadershipHours)}</TableCell>
+                <TableCell className="text-right font-medium tabular-nums">{formatHours(row.hoursUsed)}</TableCell>
+                <TableCell className="text-right">
+                  <HoursRemaining value={row.hoursRemaining} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="divide-y divide-[var(--border)] lg:hidden">
+        {rows.map((row) => (
+          <button
+            key={row.projectId}
+            type="button"
+            className="flex w-full flex-col gap-2 px-4 py-3.5 text-left"
+            onClick={() => onOpenClient(row.clientId)}
+          >
+            <div className="min-w-0">
+              <p className="font-medium text-[var(--foreground)]">{row.clientName}</p>
+              <p className="truncate text-sm text-[var(--muted-foreground)]">{row.projectName}</p>
+            </div>
+            <div className="flex items-center justify-between text-sm tabular-nums">
+              <span className="text-[var(--muted-foreground)]">
+                Dev {formatHours(row.developmentHours)} · Lead {formatHours(row.deliveryLeadHours)} · Tech {formatHours(row.technicalLeadershipHours)}
+              </span>
+              <HoursRemaining value={row.hoursRemaining} />
             </div>
           </button>
         ))}
@@ -434,6 +509,16 @@ export function DashboardView() {
                 <ProjectTypeHeading title={PROJECT_TYPE_LABELS.CAPITAL_TIME_AND_MATERIALS} count={groupedRows.capitalTimeAndMaterials.length} />
                 <DashboardSplitHoursTable
                   rows={groupedRows.capitalTimeAndMaterials}
+                  SortLabel={SortLabel}
+                  onOpenClient={(clientId) => router.push(`/clients/${clientId}`)}
+                />
+              </>
+            ) : null}
+            {groupedRows.sow.length > 0 ? (
+              <>
+                <ProjectTypeHeading title={PROJECT_TYPE_LABELS.SOW} count={groupedRows.sow.length} />
+                <DashboardSowTable
+                  rows={groupedRows.sow}
                   SortLabel={SortLabel}
                   onOpenClient={(clientId) => router.push(`/clients/${clientId}`)}
                 />

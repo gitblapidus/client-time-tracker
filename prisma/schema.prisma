@@ -65,6 +65,10 @@ model Project {
   devRate                Float?
   estimatedPmHours       Float?
   pmRate                 Float?
+  quotedHours            Float?
+  quotedDevelopmentHours Float?
+  quotedDeliveryLeadHours Float?
+  quotedTechnicalLeadershipHours Float?
   productionManager      String?
   burnStatus            String      @default("Not Started")
   active                Boolean     @default(true)
@@ -79,6 +83,90 @@ model Project {
   @@index([productionManager])
 }
 
+model IntegrationClient {
+  id              String                @id @default(cuid())
+  name            String                @unique
+  executiveName   String?
+  executiveEmail  String?
+  executivePhone  String?
+  spocName        String?
+  spocEmail       String?
+  spocPhone       String?
+  active          Boolean               @default(true)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  projects        IntegrationProject[]
+
+  @@index([active])
+  @@index([name])
+}
+
+model IntegrationProject {
+  id                 String             @id @default(cuid())
+  clientId           String
+  client             IntegrationClient  @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  name               String
+  productionManager  String?
+  active             Boolean            @default(true)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([clientId, name])
+  @@index([clientId])
+  @@index([active])
+  @@index([productionManager])
+}
+
+model IntegrationInventory {
+  id           String   @id @default(cuid())
+  referenceId  String   @unique
+  name         String
+  description  String?
+  mvp          Boolean  @default(false)
+  type         String   @default("In Scope")
+  direction    String
+  mode         String
+  format       String
+  dataSource   String?
+  dataTarget   String?
+  responsible  String?
+  pillar       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  details      IntegrationDetails?
+
+  @@index([name])
+  @@index([mvp])
+  @@index([type])
+  @@index([direction])
+  @@index([mode])
+  @@index([format])
+  @@index([responsible])
+  @@index([pillar])
+}
+
+model IntegrationDetails {
+  id                          String               @id @default(cuid())
+  inventoryId                 String               @unique
+  inventory                   IntegrationInventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  overview                    String?
+  assumptions                 Json                 @default("[]")
+  source                      String?
+  target                      String?
+  interfaceType               String?
+  interfaceFormat             String?
+  dataDependencies            String?
+  jobDependencies             String?
+  frequency                   String?
+  scheduledMechanism          String?
+  performanceConsiderations   String?
+  interfaceTimeoutValue       String?
+  expectedDataVolume          String?
+  solutionApproach            String?
+  createdAt                   DateTime             @default(now())
+  updatedAt                   DateTime             @updatedAt
+}
+
 model TimeEntry {
   id                String   @id @default(cuid())
   projectId         String
@@ -88,6 +176,8 @@ model TimeEntry {
   hoursUsed         Float
   developmentHours  Float?
   pmHours           Float?
+  deliveryLeadHours Float?
+  technicalLeadershipHours Float?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
   createdById       String

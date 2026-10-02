@@ -7,14 +7,20 @@ import {
   inheritedCapitalRates,
   isManagedService,
   isOnOrAfterProjectStart,
+  isSow,
   isTimeTrackedProject,
   monthKey,
+  OVERVIEW_REPORT_TYPES,
   projectConfigFromRecord,
+  roundHours,
   TRACKED_PROJECT_TYPES,
+  usesSimpleHours,
+  usesSplitHours,
   type MonthSnapshot,
 } from "@/lib/calculations";
-import { buildBurnProject, buildBurnTotals, sortBurnProjects } from "@/lib/burn-rate";
-import { resolveTmHours } from "@/lib/time-hours";
+import { buildBurnProject, buildBurnTotals, sortBurnProjects, tmTotalSpend } from "@/lib/burn-rate";
+import { resolveSowHours, resolveTmHours, totalSowHours } from "@/lib/time-hours";
+import { sowRemaining, type SowReportRow } from "@/lib/sow-report";
 import type { TimeEntryBulkInput } from "@/lib/validations";
 
 type EntryHours = {
@@ -23,6 +29,8 @@ type EntryHours = {
   hoursUsed: number;
   developmentHours: number | null;
   pmHours: number | null;
+  deliveryLeadHours?: number | null;
+  technicalLeadershipHours?: number | null;
 };
 
 function monthHours(entries: EntryHours[], year: number, month: number) {
@@ -31,7 +39,7 @@ function monthHours(entries: EntryHours[], year: number, month: number) {
 
 function toCalcEntries(projectType: string, entries: EntryHours[]) {
   return entries.map((entry) => {
-    if (isManagedService(projectType)) {
+    if (usesSimpleHours(projectType)) {
       return { year: entry.year, month: entry.month, hoursUsed: entry.hoursUsed };
     }
     const split = resolveTmHours(entry);
@@ -44,11 +52,24 @@ function withSplitHours(
   snapshot: MonthSnapshot,
   entry: EntryHours | undefined,
 ) {
-  if (isManagedService(projectType)) {
+  if (isSow(projectType)) {
+    const split = resolveSowHours(entry);
+    return {
+      ...snapshot,
+      hoursUsed: split.hoursUsed,
+      developmentHours: split.developmentHours,
+      pmHours: null as number | null,
+      deliveryLeadHours: split.deliveryLeadHours,
+      technicalLeadershipHours: split.technicalLeadershipHours,
+    };
+  }
+  if (usesSimpleHours(projectType)) {
     return {
       ...snapshot,
       developmentHours: null as number | null,
       pmHours: null as number | null,
+      deliveryLeadHours: null as number | null,
+      technicalLeadershipHours: null as number | null,
     };
   }
   const split = resolveTmHours(entry);
@@ -57,6 +78,8 @@ function withSplitHours(
     hoursUsed: split.hoursUsed,
     developmentHours: split.developmentHours,
     pmHours: split.pmHours,
+    deliveryLeadHours: null as number | null,
+    technicalLeadershipHours: null as number | null,
   };
 }
 
@@ -109,6 +132,17 @@ export async function listTimeEntryRows(year: number, month: number) {
       year,
       month,
     );
+    const hours = withSplitHours(project.type, snapshot, monthHours(project.timeEntries, year, month));
+    const quotedHours = isSow(project.type) ? project.quotedHours ?? 0 : null;
+    const sowUsedOtherMonths = isSow(project.type)
+      ? project.timeEntries.reduce((sum, entry) => {
+          if (entry.year === year && entry.month === month) return sum;
+          return sum + entry.hoursUsed;
+        }, 0)
+      : null;
+    const hoursRemaining = isSow(project.type)
+      ? sowRemaining(quotedHours ?? 0, (sowUsedOtherMonths ?? 0) + hours.hoursUsed)
+      : hours.hoursRemaining;
     return {
       projectId: project.id,
       clientId: project.clientId,
@@ -118,7 +152,10 @@ export async function listTimeEntryRows(year: number, month: number) {
       projectType: project.type,
       monthlyHours: project.monthlyHours,
       maximumCarryoverHours: project.maximumCarryoverHours,
-      ...withSplitHours(project.type, snapshot, monthHours(project.timeEntries, year, month)),
+      quotedHours,
+      sowUsedOtherMonths,
+      ...hours,
+      hoursRemaining,
     };
   });
 }
@@ -160,8 +197,21 @@ export async function saveTimeEntries(userId: string, input: TimeEntryBulkInput)
     let hoursUsed: number;
     let developmentHours: number | null = null;
     let pmHours: number | null = null;
+    let deliveryLeadHours: number | null = null;
+    let technicalLeadershipHours: number | null = null;
 
-    if (isManagedService(projectType)) {
+    if (isSow(projectType)) {
+      const split = resolveSowHours({
+        hoursUsed: entry.hoursUsed ?? 0,
+        developmentHours: entry.developmentHours,
+        deliveryLeadHours: entry.deliveryLeadHours,
+        technicalLeadershipHours: entry.technicalLeadershipHours,
+      });
+      developmentHours = split.developmentHours;
+      deliveryLeadHours = split.deliveryLeadHours;
+      technicalLeadershipHours = split.technicalLeadershipHours;
+      hoursUsed = split.hoursUsed;
+    } else if (usesSimpleHours(projectType)) {
       hoursUsed = entry.hoursUsed ?? 0;
     } else if (entry.developmentHours != null || entry.pmHours != null) {
       const split = resolveTmHours({
@@ -194,6 +244,8 @@ export async function saveTimeEntries(userId: string, input: TimeEntryBulkInput)
         hoursUsed,
         developmentHours,
         pmHours,
+        deliveryLeadHours,
+        technicalLeadershipHours,
         createdById: userId,
         updatedById: userId,
       },
@@ -201,6 +253,8 @@ export async function saveTimeEntries(userId: string, input: TimeEntryBulkInput)
         hoursUsed,
         developmentHours,
         pmHours,
+        deliveryLeadHours,
+        technicalLeadershipHours,
         updatedById: userId,
       },
     });
@@ -246,7 +300,7 @@ export async function buildReport(params: {
   endMonth: number;
 }) {
   const projects = await prisma.project.findMany({
-    where: reportProjectWhere(params, [...TRACKED_PROJECT_TYPES]),
+    where: reportProjectWhere(params, [...OVERVIEW_REPORT_TYPES]),
     include: { client: true, timeEntries: true },
     orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
   });
@@ -260,16 +314,27 @@ export async function buildReport(params: {
       params.endYear,
       params.endMonth,
     );
-    return snapshots.map((snapshot) => ({
-      clientId: project.clientId,
-      clientName: project.client.name,
-      projectId: project.id,
-      projectName: project.name,
-      productionManager: project.productionManager,
-      projectType: project.type,
-      monthlyHours: project.monthlyHours,
-      ...withSplitHours(project.type, snapshot, monthHours(project.timeEntries, snapshot.year, snapshot.month)),
-    }));
+    return snapshots.map((snapshot) => {
+      const hours = withSplitHours(project.type, snapshot, monthHours(project.timeEntries, snapshot.year, snapshot.month));
+      const rates = inheritedCapitalRates({
+        currency: project.currency ?? project.client.currency,
+        devRate: project.devRate ?? project.client.devRate,
+        pmRate: project.pmRate ?? project.client.pmRate,
+      });
+      const splitProject = usesSplitHours(project.type);
+      return {
+        clientId: project.clientId,
+        clientName: project.client.name,
+        projectId: project.id,
+        projectName: project.name,
+        productionManager: project.productionManager,
+        projectType: project.type,
+        monthlyHours: project.monthlyHours,
+        ...hours,
+        currency: splitProject ? rates.currency : null,
+        totalSpend: splitProject ? tmTotalSpend(hours.developmentHours, hours.pmHours, rates.devRate, rates.pmRate) : null,
+      };
+    });
   });
 
   const managed = rows.filter((row) => isManagedService(row.projectType));
@@ -352,6 +417,63 @@ export async function buildBurnRateReport(params: {
   };
 }
 
+export async function buildSowReport(params: {
+  clientIds?: string[];
+  projectIds?: string[];
+  productionManagers?: string[];
+  startYear: number;
+  startMonth: number;
+  endYear: number;
+  endMonth: number;
+}) {
+  const startKey = monthKey(params.startYear, params.startMonth);
+  const endKey = monthKey(params.endYear, params.endMonth);
+  const projects = await prisma.project.findMany({
+    where: reportProjectWhere(params, ["SOW"]),
+    include: { client: true, timeEntries: true },
+    orderBy: [{ client: { name: "asc" } }, { name: "asc" }],
+  });
+
+  const rows: SowReportRow[] = projects
+    .filter((project) => monthKey(project.startYear, project.startMonth) <= endKey)
+    .map((project) => {
+      const used = project.timeEntries.reduce(
+        (sum, entry) => {
+          const key = monthKey(entry.year, entry.month);
+          if (key < startKey || key > endKey) return sum;
+          if (!isOnOrAfterProjectStart(projectConfigFromRecord(project), entry.year, entry.month)) return sum;
+          const split = resolveSowHours(entry);
+          return {
+            developmentHours: sum.developmentHours + split.developmentHours,
+            deliveryLeadHours: sum.deliveryLeadHours + split.deliveryLeadHours,
+            technicalLeadershipHours: sum.technicalLeadershipHours + split.technicalLeadershipHours,
+            hoursUsed: sum.hoursUsed + split.hoursUsed,
+          };
+        },
+        { developmentHours: 0, deliveryLeadHours: 0, technicalLeadershipHours: 0, hoursUsed: 0 },
+      );
+      const quotedHours = project.quotedHours ?? totalSowHours(
+        project.quotedDevelopmentHours ?? 0,
+        project.quotedDeliveryLeadHours ?? 0,
+        project.quotedTechnicalLeadershipHours ?? 0,
+      );
+      return {
+        projectId: project.id,
+        clientName: project.client.name,
+        projectName: project.name,
+        productionManager: project.productionManager,
+        quotedHours,
+        developmentHours: roundHours(used.developmentHours),
+        deliveryLeadHours: roundHours(used.deliveryLeadHours),
+        technicalLeadershipHours: roundHours(used.technicalLeadershipHours),
+        hoursUsed: roundHours(used.hoursUsed),
+        hoursRemaining: sowRemaining(quotedHours, used.hoursUsed),
+      };
+    });
+
+  return { rows };
+}
+
 export async function getDashboard(year: number, month: number) {
   const [clients, projects] = await Promise.all([
     prisma.client.findMany(),
@@ -377,6 +499,14 @@ export async function getDashboard(year: number, month: number) {
         year,
         month,
       );
+      const hours = withSplitHours(project.type, snapshot, monthHours(project.timeEntries, year, month));
+      const quotedHours = isSow(project.type) ? project.quotedHours ?? 0 : null;
+      const sowUsedOtherMonths = isSow(project.type)
+        ? project.timeEntries.reduce((sum, entry) => {
+            if (entry.year === year && entry.month === month) return sum;
+            return sum + entry.hoursUsed;
+          }, 0)
+        : null;
       return {
         clientId: project.clientId,
         clientName: project.client.name,
@@ -385,7 +515,12 @@ export async function getDashboard(year: number, month: number) {
         productionManager: project.productionManager,
         projectType: project.type,
         monthlyHours: project.monthlyHours,
-        ...withSplitHours(project.type, snapshot, monthHours(project.timeEntries, year, month)),
+        quotedHours,
+        sowUsedOtherMonths,
+        ...hours,
+        hoursRemaining: isSow(project.type)
+          ? sowRemaining(quotedHours ?? 0, (sowUsedOtherMonths ?? 0) + hours.hoursUsed)
+          : hours.hoursRemaining,
       };
     });
 

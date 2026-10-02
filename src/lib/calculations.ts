@@ -1,12 +1,19 @@
-export const PROJECT_TYPES = ["MANAGED_SERVICE", "TIME_AND_MATERIALS", "CAPITAL_TIME_AND_MATERIALS"] as const;
+export const PROJECT_TYPES = ["MANAGED_SERVICE", "TIME_AND_MATERIALS", "CAPITAL_TIME_AND_MATERIALS", "SOW"] as const;
 export type ProjectType = (typeof PROJECT_TYPES)[number];
 
 export const TRACKED_PROJECT_TYPES = [
   "MANAGED_SERVICE",
   "TIME_AND_MATERIALS",
   "CAPITAL_TIME_AND_MATERIALS",
+  "SOW",
 ] as const;
 export type TrackedProjectType = (typeof TRACKED_PROJECT_TYPES)[number];
+
+export const OVERVIEW_REPORT_TYPES = [
+  "MANAGED_SERVICE",
+  "TIME_AND_MATERIALS",
+  "CAPITAL_TIME_AND_MATERIALS",
+] as const;
 
 export const PROJECT_CURRENCIES = ["USD", "EUR"] as const;
 export type ProjectCurrency = (typeof PROJECT_CURRENCIES)[number];
@@ -36,6 +43,7 @@ export const PROJECT_TYPE_LABELS: Record<ProjectType, string> = {
   MANAGED_SERVICE: "Managed Service",
   TIME_AND_MATERIALS: "Time & Materials",
   CAPITAL_TIME_AND_MATERIALS: "Capital-Time & Material",
+  SOW: "SOW",
 };
 
 export const UTILIZATION_STATUSES = [
@@ -86,12 +94,20 @@ export function isCapitalTimeAndMaterials(type: ProjectType | string): boolean {
   return type === "CAPITAL_TIME_AND_MATERIALS";
 }
 
+export function isSow(type: ProjectType | string): boolean {
+  return type === "SOW";
+}
+
 export function usesSplitHours(type: ProjectType | string): boolean {
   return isTimeAndMaterials(type) || isCapitalTimeAndMaterials(type);
 }
 
+export function usesSimpleHours(type: ProjectType | string): boolean {
+  return isManagedService(type) || isSow(type);
+}
+
 export function isTimeTrackedProject(type: ProjectType | string): boolean {
-  return isManagedService(type) || usesSplitHours(type);
+  return usesSimpleHours(type) || usesSplitHours(type);
 }
 
 export function monthKey(year: number, month: number): number {

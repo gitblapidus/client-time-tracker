@@ -94,6 +94,70 @@ input[type="number"] {
   appearance: textfield;
 }
 
+.rich-text :where(p) {
+  margin: 0 0 0.5rem;
+}
+
+.rich-text :where(p:last-child) {
+  margin-bottom: 0;
+}
+
+.rich-text :where(h2) {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+.rich-text :where(h3) {
+  margin: 0.65rem 0 0.3rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.rich-text :where(ul) {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  list-style: disc;
+}
+
+.rich-text :where(ol) {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  list-style: decimal;
+}
+
+.rich-text :where(li) {
+  margin: 0.15rem 0;
+}
+
+.rich-text :where(blockquote) {
+  margin: 0.5rem 0;
+  border-left: 3px solid var(--border);
+  padding-left: 0.75rem;
+  color: var(--muted-foreground);
+}
+
+.rich-text :where(strong),
+.rich-text :where(b) {
+  font-weight: 600;
+}
+
+.rich-text :where(u) {
+  text-decoration: underline;
+}
+
+.rich-text :where(s) {
+  text-decoration: line-through;
+}
+
+.rich-text p.is-editor-empty:first-child::before {
+  color: var(--muted-foreground);
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
